@@ -9,8 +9,9 @@ subsequent `pip install` / `uv add` will use the configured feed — with
 
 ```bash
 # 1. Create & activate a fresh environment
-python -m venv .venv && source .venv/bin/activate   # Linux / macOS
-python -m venv .venv && .venv\Scripts\activate       # Windows
+python -m venv .venv && source .venv/bin/activate   # venv (Linux / macOS)
+python -m venv .venv && .venv\Scripts\activate       # venv (Windows)
+conda create -n myenv python && conda activate myenv # conda
 
 # 2. Install pypi-lockdown (one-time, explicit index)
 pip install pypi-lockdown --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
@@ -27,14 +28,17 @@ pip install requests   # resolved from the internal feed
 `pypi-lockdown` writes configuration files that redirect the default package
 index:
 
-| Tool    | Scope           | File written                              |
-|---------|-----------------|-------------------------------------------|
-| **pip** | virtual env     | `$VIRTUAL_ENV/pip.conf` (or `pip.ini`)    |
-| **pip** | user (fallback) | `~/.config/pip/pip.conf` (platform-aware) |
-| **uv**  | user            | `~/.config/uv/uv.toml` (platform-aware)  |
+| Tool    | Scope               | File written                                    |
+|---------|---------------------|-------------------------------------------------|
+| **pip** | environment (default) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
+| **pip** | user (fallback)     | `~/.config/pip/pip.conf` (platform-aware)       |
+| **uv**  | user                | `~/.config/uv/uv.toml` (platform-aware)        |
 
 Poetry requires per-project configuration — the tool prints the exact
 commands and TOML snippet to add.
+
+Works with **venv**, **conda**, and any other environment manager that sets
+`VIRTUAL_ENV` or `CONDA_PREFIX`.
 
 ## Options
 
@@ -44,8 +48,8 @@ python -m pypi_lockdown INDEX_URL [--user]
 
 | Flag     | Effect |
 |----------|--------|
-| *(none)* | Writes pip config into the active virtual environment. Falls back to user home when no venv is detected. Always writes uv config to user home. |
-| `--user` | Forces pip config to the user home directory even when a virtual environment is active. |
+| *(none)* | Writes pip config into the active Python environment. Falls back to user home when no environment is detected. Always writes uv config to user home. |
+| `--user` | Forces pip config to the user home directory even when an environment is active. |
 
 ## User-home config locations
 

@@ -15,17 +15,22 @@ _MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on n
 # Path helpers
 # ---------------------------------------------------------------------------
 
-def _venv_path() -> Path | None:
-    v = os.environ.get("VIRTUAL_ENV")
-    return Path(v) if v else None
+def _env_path() -> Path | None:
+    """Return the active Python environment root (venv or conda), if any."""
+    for var in ("VIRTUAL_ENV", "CONDA_PREFIX"):
+        v = os.environ.get(var)
+        if v:
+            return Path(v)
+    return None
 
 
 def _is_windows() -> bool:
     return platform.system() == "Windows"
 
 
-def _pip_config_venv(venv: Path) -> Path:
-    return venv / ("pip.ini" if _is_windows() else "pip.conf")
+def _pip_config_env(env: Path) -> Path:
+    """pip config inside a venv or conda environment."""
+    return env / ("pip.ini" if _is_windows() else "pip.conf")
 
 
 def _pip_config_user() -> Path:
@@ -109,19 +114,19 @@ def _print_poetry_instructions(index_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 def configure(index_url: str, *, user_scope: bool = False) -> None:
-    venv = _venv_path()
+    env = _env_path()
 
     print(f"\nConfiguring index: {index_url}\n")
 
     # --- pip ---
-    if venv and not user_scope:
-        print(f"Virtual environment: {venv}\n")
-        _write_pip_config(_pip_config_venv(venv), index_url)
+    if env and not user_scope:
+        print(f"Python environment: {env}\n")
+        _write_pip_config(_pip_config_env(env), index_url)
     else:
-        if venv:
+        if env:
             print("Writing to user directory (--user).\n")
         else:
-            print("No virtual environment detected — writing to user directory.\n")
+            print("No Python environment detected — writing to user directory.\n")
         _write_pip_config(_pip_config_user(), index_url)
 
     # --- uv (user-level only) ---

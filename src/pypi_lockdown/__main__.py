@@ -19,7 +19,7 @@ def main():
     parser.add_argument(
         "--user",
         action="store_true",
-        help="Write pip config to user home instead of the active virtual environment",
+        help="Write pip config to user home instead of the active Python environment",
     )
     args = parser.parse_args()
     configure(args.index_url, user_scope=args.user)
