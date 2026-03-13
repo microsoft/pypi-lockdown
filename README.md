@@ -45,13 +45,46 @@ Works with **venv**, **conda**, and any other environment manager that sets
 ## Options
 
 ```
-python -m pypi_lockdown INDEX_URL [--user]
+python -m pypi_lockdown [configure] INDEX_URL [--user]
+python -m pypi_lockdown scaffold NAME INDEX_URL
 ```
+
+| Command      | Effect |
+|--------------|--------|
+| `configure`  | Write pip/uv config files (default when omitted). |
+| `scaffold`   | Generate a wrapper package that hardcodes a private feed URL. |
 
 | Flag     | Effect |
 |----------|--------|
 | *(none)* | Writes pip config into the active Python environment. Falls back to user home when no environment is detected. Always writes uv config to user home. |
 | `--user` | Forces pip config to the user home directory even when an environment is active. |
+
+## Creating team-specific wrapper packages
+
+Use `scaffold` to generate a small package that hardcodes your team's feed
+URL and depends on `pypi-lockdown`:
+
+```bash
+python -m pypi_lockdown scaffold ai4s-pypi-lockdown \
+    https://pkgs.dev.azure.com/ai4s/ai4s/_packaging/ai4s-pypi/pypi/simple/
+```
+
+This creates a ready-to-publish package:
+
+```
+ai4s-pypi-lockdown/
+├── pyproject.toml
+└── src/ai4s_pypi_lockdown/
+    ├── __init__.py
+    └── __main__.py
+```
+
+Users of that wrapper only need:
+
+```bash
+pip install ai4s-pypi-lockdown --index-url https://pkgs.dev.azure.com/.../PUBLIC_FEED/pypi/simple/
+python -m ai4s_pypi_lockdown
+```
 
 ## User-home config locations
 

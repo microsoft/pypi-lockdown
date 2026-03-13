@@ -2,6 +2,7 @@ import argparse
 import sys
 
 from .configure import configure
+from .scaffold import scaffold
 
 
 def main():
@@ -9,20 +10,52 @@ def main():
         prog="pypi-lockdown",
         description=(
             "Lock down pip, uv, and poetry to pull packages from an "
-            "internal PyPI feed. Run once after creating a new environment."
+            "internal PyPI feed."
         ),
     )
-    parser.add_argument(
-        "index_url",
-        help="Internal feed URL (e.g. https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/)",
+    sub = parser.add_subparsers(dest="command")
+
+    # --- configure (default when no subcommand) ---
+    p_configure = sub.add_parser(
+        "configure",
+        help="Write pip/uv config files pointing at an internal feed",
     )
-    parser.add_argument(
+    p_configure.add_argument(
+        "index_url",
+        help="Internal feed URL",
+    )
+    p_configure.add_argument(
         "--user",
         action="store_true",
         help="Write pip config to user home instead of the active Python environment",
     )
-    args = parser.parse_args()
-    configure(args.index_url, user_scope=args.user)
+
+    # --- scaffold ---
+    p_scaffold = sub.add_parser(
+        "scaffold",
+        help="Generate a wrapper package that hardcodes a private feed URL",
+    )
+    p_scaffold.add_argument(
+        "name",
+        help="Package name (e.g. ai4s-pypi-lockdown)",
+    )
+    p_scaffold.add_argument(
+        "index_url",
+        help="Internal feed URL to hardcode",
+    )
+
+    # Allow bare `python -m pypi_lockdown URL` as shorthand for `configure URL`
+    _commands = {"configure", "scaffold", "-h", "--help"}
+    argv = sys.argv[1:]
+    if argv and argv[0] not in _commands:
+        argv = ["configure"] + argv
+
+    args = parser.parse_args(argv)
+
+    if args.command == "configure":
+        configure(args.index_url, user_scope=args.user)
+    elif args.command == "scaffold":
+        scaffold(args.name, args.index_url)
 
 
 if __name__ == "__main__":
