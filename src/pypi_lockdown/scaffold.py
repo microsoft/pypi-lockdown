@@ -29,6 +29,9 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+{name} = "{module}.__main__:main"
 """
 
 _MAIN_PY = """\
@@ -72,7 +75,7 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
 
     pkg.mkdir(parents=True)
     (root / "pyproject.toml").write_text(
-        _PYPROJECT_TOML.format(name=name)
+        _PYPROJECT_TOML.format(name=name, module=module)
     )
     (pkg / "__init__.py").write_text("")
     (pkg / "__main__.py").write_text(

@@ -17,3 +17,6 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+pypi-lockdown = "pypi_lockdown.__main__:main"
