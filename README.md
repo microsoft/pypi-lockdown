@@ -13,14 +13,16 @@ python -m venv .venv && source .venv/bin/activate   # venv (Linux / macOS)
 python -m venv .venv && .venv\Scripts\activate       # venv (Windows)
 conda create -n myenv python && conda activate myenv # conda
 
-# 2. Install pypi-lockdown (one-time, explicit index)
-pip install pypi-lockdown --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
+# 2. Install pypi-lockdown from the public feed
+pip install pypi-lockdown \
+    --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
 
-# 3. Lock down the environment
-python -m pypi_lockdown https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
+# 3. Lock down the environment to use the authenticated feed
+python -m pypi_lockdown \
+    https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
 
-# 4. Done — all future installs use the internal feed
-pip install requests   # resolved from the internal feed
+# 4. Done — all future installs use the authenticated feed
+pip install requests   # resolved from PRIVATE_FEED, authenticated via artifacts-keyring
 ```
 
 ## What it does
