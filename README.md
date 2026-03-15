@@ -157,6 +157,27 @@ poetry source add --priority=primary internal https://pkgs.dev.azure.com/ORG/PRO
 poetry source add --priority=explicit PyPI
 ```
 
+## Creating a release
+
+Tag the repo and run the release script to build `.pyz` artifacts for all
+platforms and publish a GitHub release:
+
+```bash
+git tag v1.0.0
+./scripts/release.sh v1.0.0
+```
+
+The script runs `tox -e standalone` (cross-builds for linux-x86_64,
+macOS-universal2, win-amd64) then calls `gh release create` with all `.pyz`
+files.
+
+> The build needs `artifacts-keyring-nofuss` resolvable by pip.  If your
+> user-level pip config isn't set up, pass feed access via the `PIP_ARGS`
+> env variable:
+> ```bash
+> PIP_ARGS="--extra-index-url https://pkgs.dev.azure.com/.../pypi/simple/" ./scripts/release.sh v1.0.0
+> ```
+
 ## License
 
 MIT
