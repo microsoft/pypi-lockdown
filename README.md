@@ -74,6 +74,7 @@ This creates a ready-to-publish package:
 ```
 ai4s-pypi-lockdown/
 ├── pyproject.toml
+├── tox.ini
 └── src/ai4s_pypi_lockdown/
     ├── __init__.py
     └── __main__.py
@@ -85,6 +86,59 @@ Users of that wrapper only need:
 pip install ai4s-pypi-lockdown --index-url https://pkgs.dev.azure.com/.../PUBLIC_FEED/pypi/simple/
 python -m ai4s_pypi_lockdown
 ```
+
+## Standalone `.pyz` distribution
+
+For environments where you can't (or don't want to) `pip install` first, build
+a standalone zipapp using [shiv](https://github.com/linkedin/shiv).  The `.pyz`
+bundles pypi-lockdown, `artifacts-keyring-nofuss`, and all transitive
+dependencies — including the keyring, which gets auto-installed into the target
+environment.
+
+### Build
+
+```bash
+pip install 'pypi-lockdown[build]'          # install shiv + tox
+
+# Build for all platforms from a single machine
+tox -e standalone                            # → dist/pypi-lockdown-{platform}.pyz
+
+# Or build for the current platform only
+tox -e standalone -- native                  # → dist/pypi-lockdown.pyz
+
+# Or build for a specific platform
+tox -e standalone -- linux-x86_64            # → dist/pypi-lockdown-linux-x86_64.pyz
+```
+
+> **Note:** `.pyz` files are platform-specific because `cryptography` (a
+> transitive keyring dependency on Linux) contains native extensions.  Cross-
+> building uses `pip download --platform` so all variants can be built from a
+> single machine.
+
+### Use
+
+```bash
+# Download the .pyz for your platform (from a shared drive, internal server, etc.)
+python pypi-lockdown.pyz \
+    https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
+```
+
+This writes pip/uv config files **and** installs `artifacts-keyring-nofuss`
+plus all its dependencies into the active Python environment — no network
+access to any package feed required.
+
+### Wrapper `.pyz` files
+
+Scaffolded wrapper packages include a `tox.ini` and can build their own
+standalone `.pyz` files the same way:
+
+```bash
+cd ai4s-pypi-lockdown
+tox -e standalone       # builds ai4s-pypi-lockdown-{platform}.pyz
+```
+
+End users just run the wrapper `.pyz` — the feed URL is hardcoded, zero config
+needed.
 
 ## User-home config locations
 

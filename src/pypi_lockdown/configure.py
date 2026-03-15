@@ -132,6 +132,14 @@ def configure(index_url: str, *, user_scope: bool = False) -> None:
     # --- uv (user-level only) ---
     _write_uv_config(_uv_config_user(), index_url)
 
+    # --- standalone: bootstrap keyring into target env ---
+    if env:
+        from .standalone import bootstrap_keyring, is_standalone
+
+        if is_standalone():
+            print()
+            bootstrap_keyring(env)
+
     # --- poetry ---
     _print_poetry_instructions(index_url)
 

@@ -30,6 +30,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[project.optional-dependencies]
+build = ["shiv", "tox"]
+
 [project.scripts]
 {name} = "{module}.__main__:main"
 """
@@ -60,6 +63,8 @@ if __name__ == "__main__":
     main()
 """
 
+_TOX_INI = "[tox]\nenv_list = standalone\n\n[testenv:standalone]\ndescription = Build standalone .pyz zipapps for all target platforms\ndeps =\n    shiv\n    build\ncommands =\n    python -m pypi_lockdown._build_standalone {posargs:all}\n"
+
 
 def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     """Create a wrapper package directory.
@@ -77,6 +82,7 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     (root / "pyproject.toml").write_text(
         _PYPROJECT_TOML.format(name=name, module=module)
     )
+    (root / "tox.ini").write_text(_TOX_INI)
     (pkg / "__init__.py").write_text("")
     (pkg / "__main__.py").write_text(
         _MAIN_PY.format(name=name, index_url=index_url)
@@ -85,6 +91,7 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     print(f"\nScaffolded {name} at {root}\n")
     print(f"  {root}/")
     print(f"  ├── pyproject.toml")
+    print(f"  ├── tox.ini")
     print(f"  └── src/{module}/")
     print(f"      ├── __init__.py")
     print(f"      └── __main__.py")
@@ -97,6 +104,7 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     print(f"    pip install -e .")
     print(f"    python -m {module}          # test it")
     print(f"    python -m build             # build for publishing")
+    print(f"    tox -e standalone           # build standalone .pyz files")
     print()
 
     return root
