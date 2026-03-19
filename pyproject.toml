@@ -20,6 +20,33 @@ where = ["src"]
 
 [project.optional-dependencies]
 build = ["shiv", "tox"]
+dev = [
+    "mypy>=1.10",
+    "pre-commit>=4.0",
+    "ruff>=0.7",
+]
 
 [project.scripts]
 pypi-lockdown = "pypi_lockdown.__main__:main"
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",   # trailing-comma — conflicts with ruff formatter
+    "ISC001",   # single-line-implicit-string-concat — conflicts with ruff formatter
+    "D",        # pydocstyle — docstring coverage is intentionally minimal
+    "T201",     # print — this is a CLI tool, print is the primary output mechanism
+    "S603",     # subprocess-without-shell-equals-true — we call known build tools
+    "S607",     # start-process-with-partial-path — we intentionally call pip/shiv by name
+    "PLR2004",  # magic-value-comparison — status codes are self-documenting
+]
+
+[tool.ruff.lint.per-file-ignores]
+"_build_standalone.py" = ["S404"]  # subprocess module usage is intentional in build scripts
+
+[tool.mypy]
+strict = true
+files = ["src"]

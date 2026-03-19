@@ -5,7 +5,6 @@ from __future__ import annotations
 import configparser
 import os
 import platform
-import sys
 from pathlib import Path
 
 _MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on next run\n"
@@ -14,6 +13,7 @@ _MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on n
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
+
 
 def _env_path() -> Path | None:
     """Return the active Python environment root (venv or conda), if any."""
@@ -57,6 +57,7 @@ def _uv_config_user() -> Path:
 # Writers
 # ---------------------------------------------------------------------------
 
+
 def _write_pip_config(path: Path, index_url: str) -> None:
     cfg = configparser.ConfigParser()
     if path.exists():
@@ -66,7 +67,7 @@ def _write_pip_config(path: Path, index_url: str) -> None:
     cfg.set("global", "index-url", index_url)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as fh:
+    with path.open("w") as fh:
         fh.write(_MARKER)
         cfg.write(fh)
     print(f"  \u2713 {path}")
@@ -98,12 +99,12 @@ def _print_poetry_instructions(index_url: str) -> None:
         "\n"
         "  Or add to pyproject.toml manually:\n"
         "\n"
-        '    [[tool.poetry.source]]\n'
+        "    [[tool.poetry.source]]\n"
         '    name = "internal"\n'
         f'    url = "{index_url}"\n'
         '    priority = "primary"\n'
         "\n"
-        '    [[tool.poetry.source]]\n'
+        "    [[tool.poetry.source]]\n"
         '    name = "PyPI"\n'
         '    priority = "explicit"\n'
     )
@@ -112,6 +113,7 @@ def _print_poetry_instructions(index_url: str) -> None:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def configure(index_url: str, *, user_scope: bool = False) -> None:
     env = _env_path()
@@ -134,7 +136,7 @@ def configure(index_url: str, *, user_scope: bool = False) -> None:
 
     # --- standalone: bootstrap keyring into target env ---
     if env:
-        from .standalone import bootstrap_keyring, is_standalone
+        from .standalone import bootstrap_keyring, is_standalone  # noqa: PLC0415
 
         if is_standalone():
             print()
