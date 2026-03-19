@@ -3,6 +3,7 @@ import sys
 
 from .configure import configure
 from .scaffold import scaffold
+from .verify import verify
 
 
 def main() -> None:
@@ -28,6 +29,21 @@ def main() -> None:
         action="store_true",
         help="Write pip config to user home instead of the active Python environment",
     )
+    p_configure.add_argument(
+        "--verify",
+        action="store_true",
+        help="After configuring, verify the feed is reachable and authentication works",
+    )
+
+    # --- verify ---
+    p_verify = sub.add_parser(
+        "verify",
+        help="Test that the configured feed is reachable and authentication works",
+    )
+    p_verify.add_argument(
+        "index_url",
+        help="Feed URL to verify",
+    )
 
     # --- scaffold ---
     p_scaffold = sub.add_parser(
@@ -44,7 +60,7 @@ def main() -> None:
     )
 
     # Allow bare `python -m pypi_lockdown URL` as shorthand for `configure URL`
-    _commands = {"configure", "scaffold", "-h", "--help"}
+    _commands = {"configure", "scaffold", "verify", "-h", "--help"}
     argv = sys.argv[1:]
     if argv and argv[0] not in _commands:
         argv = ["configure", *argv]
@@ -53,6 +69,10 @@ def main() -> None:
 
     if args.command == "configure":
         configure(args.index_url, user_scope=args.user)
+        if args.verify:
+            verify(args.index_url)
+    elif args.command == "verify":
+        verify(args.index_url)
     elif args.command == "scaffold":
         scaffold(args.name, args.index_url)
 

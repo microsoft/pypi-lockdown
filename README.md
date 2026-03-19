@@ -178,6 +178,19 @@ files.
 > PIP_ARGS="--extra-index-url https://pkgs.dev.azure.com/.../pypi/simple/" ./scripts/release.sh v1.0.0
 > ```
 
+## Security model
+
+- **HTTPS required**: `configure` rejects non-HTTPS index URLs — HTTP would expose
+  credentials and package content to network observers.
+- **Standalone `.pyz` integrity**: The `.pyz` zipapp is the trust root when
+  bootstrapping without network access. Distribute it via a trusted channel (internal
+  file share, signed release artifact). Once extracted, packages are verified against
+  their bundled `.dist-info` metadata.
+- **Build-time zip-slip protection**: Wheel extraction during `.pyz` builds validates
+  that no archive entry escapes the staging directory.
+- **Narrow config scope**: `pypi-lockdown` only writes `index-url` to pip/uv config
+  files. It does not modify global Python settings or install hooks.
+
 ## License
 
 MIT

@@ -72,8 +72,14 @@ def _run(cmd: list[str], **kw: object) -> None:
 def _extract_wheels(wheel_dir: Path, staging: Path) -> None:
     """Unzip all .whl files into a flat site-packages layout."""
     staging.mkdir(parents=True, exist_ok=True)
+    resolved_staging = staging.resolve()
     for whl in sorted(wheel_dir.glob("*.whl")):
         with zipfile.ZipFile(whl) as zf:
+            for info in zf.infolist():
+                target = (staging / info.filename).resolve()
+                if not str(target).startswith(str(resolved_staging)):
+                    msg = f"path traversal detected in {whl.name}: {info.filename}"
+                    raise ValueError(msg)
             zf.extractall(staging)
 
 

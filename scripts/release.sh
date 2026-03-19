@@ -43,7 +43,7 @@ rm -rf dist/*.pyz
 
 # Build all platforms, forwarding PIP_ARGS if set
 if [[ -n "${PIP_ARGS:-}" ]]; then
-    tox -e standalone -- all -- $PIP_ARGS
+    tox -e standalone -- all -- "$PIP_ARGS"
 else
     tox -e standalone
 fi
