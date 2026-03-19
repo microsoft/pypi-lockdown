@@ -46,6 +46,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "_build_standalone.py" = ["S404"]  # subprocess module usage is intentional in build scripts
+"tests/*" = ["S101"]  # assert is the standard way to write pytest tests
 
 [tool.mypy]
 strict = true

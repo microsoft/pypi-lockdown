@@ -116,6 +116,13 @@ def _print_poetry_instructions(index_url: str) -> None:
 
 
 def configure(index_url: str, *, user_scope: bool = False) -> None:
+    if not index_url.startswith("https://"):
+        print(
+            f"\n  ✗ Refusing to configure non-HTTPS index URL: {index_url}\n"
+            "    HTTPS is required to protect credentials and package integrity.\n"
+        )
+        raise SystemExit(1)
+
     env = _env_path()
 
     print(f"\nConfiguring index: {index_url}\n")
