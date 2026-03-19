@@ -7,6 +7,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -18,19 +19,42 @@ from pathlib import Path
 PLATFORMS = {
     "linux-x86_64": {
         "platform": ["manylinux2014_x86_64"],
-        "python_version": "39",
+        "python_version": "310",
     },
     "macos-universal2": {
-        "platform": ["macosx_10_9_universal2"],
-        "python_version": "39",
+        "platform": ["macosx_11_0_universal2"],
+        "python_version": "310",
     },
     "win-amd64": {
         "platform": ["win_amd64"],
-        "python_version": "39",
+        "python_version": "310",
     },
 }
 
-ROOT = Path(__file__).resolve().parents[2]  # repo root
+def _find_repo_root() -> Path:
+    """Locate the repo root by searching for pyproject.toml.
+
+    When running from a source checkout ``parents[2]`` works, but when the
+    package is installed into a venv (e.g. via tox) the file lives under
+    site-packages and that heuristic breaks.  Walk upward from the file
+    first, then fall back to cwd.
+    """
+    for anchor in (Path(__file__).resolve(), Path.cwd()):
+        cur = anchor if anchor.is_dir() else anchor.parent
+        while True:
+            if (cur / "pyproject.toml").is_file():
+                return cur
+            parent = cur.parent
+            if parent == cur:
+                break
+            cur = parent
+    raise FileNotFoundError(
+        "Cannot locate repo root (no pyproject.toml found). "
+        "Run this script from inside the pypi-lockdown source tree."
+    )
+
+
+ROOT = _find_repo_root()
 
 
 def _run(cmd: list[str], **kw) -> None:
@@ -64,8 +88,46 @@ def build_native(dist_dir: Path, pip_args: list[str] | None = None) -> Path:
     return output
 
 
+def _resolve_deps(package_path: Path) -> list[str]:
+    """Resolve the dependency tree natively and return pinned requirements.
+
+    By resolving once on the current platform we get exact versions instantly.
+    Cross-platform downloads can then use ``--no-deps`` to skip the slow
+    resolver entirely.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        report_path = f.name
+    try:
+        _run([
+            sys.executable, "-m", "pip", "install",
+            "--dry-run", "--ignore-installed",
+            "--report", report_path,
+            "--quiet",
+            str(package_path),
+        ])
+        report = json.loads(Path(report_path).read_text())
+    finally:
+        Path(report_path).unlink(missing_ok=True)
+
+    pkg_name = "pypi_lockdown"
+    reqs = []
+    for item in report["install"]:
+        meta = item["metadata"]
+        name = meta["name"]
+        if name.replace("-", "_").lower() == pkg_name:
+            continue
+        reqs.append(f"{name}=={meta['version']}")
+    return reqs
+
+
 def build_cross(target: str, dist_dir: Path, pip_args: list[str] | None = None) -> Path:
-    """Build a .pyz for a different platform via cross-download."""
+    """Build a .pyz for a different platform via cross-download.
+
+    Uses a two-phase strategy to avoid pip's slow cross-platform resolver:
+    1. Resolve the full dependency tree natively (fast).
+    2. Download pinned wheels per-package with ``--no-deps`` for the target
+       platform (no backtracking).
+    """
     cfg = PLATFORMS[target]
     dist_dir.mkdir(parents=True, exist_ok=True)
     output = dist_dir / f"pypi-lockdown-{target}.pyz"
@@ -75,21 +137,37 @@ def build_cross(target: str, dist_dir: Path, pip_args: list[str] | None = None) 
         staging = Path(tmp) / "site-packages"
         wheel_dir.mkdir()
 
-        # Download wheels for the target platform
-        cmd = [
-            sys.executable, "-m", "pip", "download",
-            "--only-binary", ":all:",
-            "--python-version", cfg["python_version"],
-            "-d", str(wheel_dir),
-        ]
+        # Phase 1: build local package wheel
+        _run([
+            sys.executable, "-m", "pip", "wheel",
+            "--no-deps", "-w", str(wheel_dir),
+            str(ROOT),
+        ])
+
+        # Phase 2: resolve deps natively, then download each for the target
+        deps = _resolve_deps(ROOT)
+        print(f"  resolved {len(deps)} dependencies: {', '.join(deps)}")
+
+        platform_args: list[str] = []
         for plat in cfg["platform"]:
-            cmd += ["--platform", plat]
-        # Also accept pure-Python wheels
-        cmd += ["--platform", "any"]
-        if pip_args:
-            cmd.extend(pip_args)
-        cmd.append(str(ROOT))
-        _run(cmd)
+            platform_args += ["--platform", plat]
+        platform_args += ["--platform", "any"]
+
+        for dep in deps:
+            cmd = [
+                sys.executable, "-m", "pip", "download",
+                "--no-deps", "--only-binary", ":all:",
+                "--python-version", cfg["python_version"],
+                "-d", str(wheel_dir),
+                *platform_args,
+            ]
+            if pip_args:
+                cmd.extend(pip_args)
+            cmd.append(dep)
+            try:
+                _run(cmd)
+            except subprocess.CalledProcessError:
+                print(f"  ⚠ Skipping {dep} (no wheel for {target})")
 
         # Extract wheels into a site-packages layout
         _extract_wheels(wheel_dir, staging)
