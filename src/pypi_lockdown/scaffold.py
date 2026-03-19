@@ -63,7 +63,14 @@ if __name__ == "__main__":
     main()
 """
 
-_TOX_INI = "[tox]\nenv_list = standalone\n\n[testenv:standalone]\ndescription = Build standalone .pyz zipapps for all target platforms\ndeps =\n    shiv\n    build\ncommands =\n    python -m pypi_lockdown._build_standalone {posargs:all}\n"
+_TOX_INI = (
+    "[tox]\nenv_list = standalone\n\n"
+    "[testenv:standalone]\n"
+    "description = Build standalone .pyz zipapps for all target platforms\n"
+    "deps =\n    shiv\n    build\n"
+    "commands =\n"
+    "    python -m pypi_lockdown._build_standalone {posargs:all}\n"
+)
 
 
 def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
@@ -76,7 +83,8 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     pkg = root / "src" / module
 
     if root.exists():
-        raise SystemExit(f"Error: {root} already exists")
+        msg = f"Error: {root} already exists"
+        raise SystemExit(msg)
 
     pkg.mkdir(parents=True)
     (root / "pyproject.toml").write_text(
@@ -84,27 +92,28 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     )
     (root / "tox.ini").write_text(_TOX_INI)
     (pkg / "__init__.py").write_text("")
-    (pkg / "__main__.py").write_text(
-        _MAIN_PY.format(name=name, index_url=index_url)
-    )
+    (pkg / "__main__.py").write_text(_MAIN_PY.format(name=name, index_url=index_url))
 
     print(f"\nScaffolded {name} at {root}\n")
     print(f"  {root}/")
-    print(f"  ├── pyproject.toml")
-    print(f"  ├── tox.ini")
+    print("  ├── pyproject.toml")
+    print("  ├── tox.ini")
     print(f"  └── src/{module}/")
-    print(f"      ├── __init__.py")
-    print(f"      └── __main__.py")
+    print("      ├── __init__.py")
+    print("      └── __main__.py")
     print()
     print(f"  Index URL: {index_url}")
     print()
     print("  Next steps:")
     print(f"    cd {name}")
-    print(f"    git init && git add -A && git tag v0.1.0 && git commit -m 'Initial commit'")
-    print(f"    pip install -e .")
+    print(
+        "    git init && git add -A && git tag v0.1.0"
+        " && git commit -m 'Initial commit'",
+    )
+    print("    pip install -e .")
     print(f"    python -m {module}          # test it")
-    print(f"    python -m build             # build for publishing")
-    print(f"    tox -e standalone           # build standalone .pyz files")
+    print("    python -m build             # build for publishing")
+    print("    tox -e standalone           # build standalone .pyz files")
     print()
 
     return root

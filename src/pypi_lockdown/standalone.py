@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import platform
 import shutil
 import sys
@@ -30,7 +29,7 @@ def _shiv_site_packages() -> Path | None:
         with zipfile.ZipFile(sys.argv[0]) as zf:
             env = json.loads(zf.read("environment.json").decode())
         build_id = env["build_id"]
-        root = Path(env.get("root") or os.path.expanduser("~/.shiv"))
+        root = Path(env.get("root") or Path("~/.shiv").expanduser())
         pyz_name = Path(sys.argv[0]).name
         sp = root / f"{pyz_name}_{build_id}" / "site-packages"
         if sp.is_dir():
@@ -57,9 +56,10 @@ def _should_skip(name: str) -> bool:
     if name == "__pycache__":
         return True
     lower = name.lower()
-    # For .dist-info dirs: "pkg_name-1.2.3.dist-info" → split on first "-" → "pkg_name"
-    # Normalized package names use underscores, never hyphens, so first "-" is the version separator.
-    if lower.endswith(".dist-info") or lower.endswith(".data"):
+    # For .dist-info dirs: "pkg_name-1.2.3.dist-info" → split on first "-"
+    # Normalized package names use underscores, never hyphens,
+    # so first "-" is the version separator.
+    if lower.endswith((".dist-info", ".data")):
         base = lower.split(".dist-info")[0].split(".data")[0]
         pkg = base.split("-", 1)[0]
     else:

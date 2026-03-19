@@ -8,15 +8,20 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import TypedDict
 
-PLATFORMS = {
+
+class _PlatformCfg(TypedDict):
+    platform: list[str]
+    python_version: str
+
+
+PLATFORMS: dict[str, _PlatformCfg] = {
     "linux-x86_64": {
         "platform": ["manylinux2014_x86_64"],
         "python_version": "310",
@@ -30,6 +35,7 @@ PLATFORMS = {
         "python_version": "310",
     },
 }
+
 
 def _find_repo_root() -> Path:
     """Locate the repo root by searching for pyproject.toml.
@@ -48,18 +54,19 @@ def _find_repo_root() -> Path:
             if parent == cur:
                 break
             cur = parent
-    raise FileNotFoundError(
+    msg = (
         "Cannot locate repo root (no pyproject.toml found). "
         "Run this script from inside the pypi-lockdown source tree."
     )
+    raise FileNotFoundError(msg)
 
 
 ROOT = _find_repo_root()
 
 
-def _run(cmd: list[str], **kw) -> None:
+def _run(cmd: list[str], **kw: object) -> None:
     print(f"  $ {' '.join(cmd)}")
-    subprocess.check_call(cmd, **kw)
+    subprocess.check_call(cmd, **kw)  # type: ignore[arg-type]
 
 
 def _extract_wheels(wheel_dir: Path, staging: Path) -> None:
@@ -75,9 +82,13 @@ def build_native(dist_dir: Path, pip_args: list[str] | None = None) -> Path:
     dist_dir.mkdir(parents=True, exist_ok=True)
     output = dist_dir / "pypi-lockdown.pyz"
     cmd = [
-        sys.executable, "-m", "shiv",
-        "-e", "pypi_lockdown.__main__:main",
-        "-o", str(output),
+        sys.executable,
+        "-m",
+        "shiv",
+        "-e",
+        "pypi_lockdown.__main__:main",
+        "-o",
+        str(output),
         "--compressed",
         str(ROOT),
     ]
@@ -98,13 +109,20 @@ def _resolve_deps(package_path: Path) -> list[str]:
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         report_path = f.name
     try:
-        _run([
-            sys.executable, "-m", "pip", "install",
-            "--dry-run", "--ignore-installed",
-            "--report", report_path,
-            "--quiet",
-            str(package_path),
-        ])
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--dry-run",
+                "--ignore-installed",
+                "--report",
+                report_path,
+                "--quiet",
+                str(package_path),
+            ]
+        )
         report = json.loads(Path(report_path).read_text())
     finally:
         Path(report_path).unlink(missing_ok=True)
@@ -138,11 +156,18 @@ def build_cross(target: str, dist_dir: Path, pip_args: list[str] | None = None) 
         wheel_dir.mkdir()
 
         # Phase 1: build local package wheel
-        _run([
-            sys.executable, "-m", "pip", "wheel",
-            "--no-deps", "-w", str(wheel_dir),
-            str(ROOT),
-        ])
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "wheel",
+                "--no-deps",
+                "-w",
+                str(wheel_dir),
+                str(ROOT),
+            ]
+        )
 
         # Phase 2: resolve deps natively, then download each for the target
         deps = _resolve_deps(ROOT)
@@ -155,10 +180,17 @@ def build_cross(target: str, dist_dir: Path, pip_args: list[str] | None = None) 
 
         for dep in deps:
             cmd = [
-                sys.executable, "-m", "pip", "download",
-                "--no-deps", "--only-binary", ":all:",
-                "--python-version", cfg["python_version"],
-                "-d", str(wheel_dir),
+                sys.executable,
+                "-m",
+                "pip",
+                "download",
+                "--no-deps",
+                "--only-binary",
+                ":all:",
+                "--python-version",
+                cfg["python_version"],
+                "-d",
+                str(wheel_dir),
                 *platform_args,
             ]
             if pip_args:
@@ -173,13 +205,20 @@ def build_cross(target: str, dist_dir: Path, pip_args: list[str] | None = None) 
         _extract_wheels(wheel_dir, staging)
 
         # Build the zipapp with shiv
-        _run([
-            sys.executable, "-m", "shiv",
-            "--site-packages", str(staging),
-            "-e", "pypi_lockdown.__main__:main",
-            "-o", str(output),
-            "--compressed",
-        ])
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "shiv",
+                "--site-packages",
+                str(staging),
+                "-e",
+                "pypi_lockdown.__main__:main",
+                "-o",
+                str(output),
+                "--compressed",
+            ]
+        )
 
     print(f"\n  ✓ {output} ({output.stat().st_size // 1024} KB)")
     return output
@@ -193,7 +232,7 @@ def main() -> None:
     if "--" in argv:
         sep = argv.index("--")
         our_args = argv[:sep]
-        pip_args = argv[sep + 1:]
+        pip_args = argv[sep + 1 :]
     else:
         our_args = argv
         pip_args = []
@@ -211,8 +250,11 @@ def main() -> None:
         print(f"\n=== Building for {mode} ===\n")
         build_cross(mode, dist_dir, pip_args)
     else:
-        targets = ", ".join(["native", "all"] + list(PLATFORMS))
-        print(f"Usage: python -m pypi_lockdown._build_standalone [{targets}] [-- PIP_ARGS]")
+        targets = ", ".join(["native", "all", *list(PLATFORMS)])
+        print(
+            f"Usage: python -m pypi_lockdown._build_standalone"
+            f" [{targets}] [-- PIP_ARGS]",
+        )
         raise SystemExit(1)
 
 

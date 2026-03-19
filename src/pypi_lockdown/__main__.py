@@ -5,12 +5,11 @@ from .configure import configure
 from .scaffold import scaffold
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         prog="pypi-lockdown",
         description=(
-            "Lock down pip, uv, and poetry to pull packages from an "
-            "internal PyPI feed."
+            "Lock down pip, uv, and poetry to pull packages from an internal PyPI feed."
         ),
     )
     sub = parser.add_subparsers(dest="command")
@@ -48,7 +47,7 @@ def main():
     _commands = {"configure", "scaffold", "-h", "--help"}
     argv = sys.argv[1:]
     if argv and argv[0] not in _commands:
-        argv = ["configure"] + argv
+        argv = ["configure", *argv]
 
     args = parser.parse_args(argv)
 
