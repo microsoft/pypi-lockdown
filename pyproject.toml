@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 dependencies = [
-    "artifacts-keyring-nofuss",
+    "artifacts-keyring-nofuss>=0.4.0",
 ]
 
 [tool.setuptools-scm]
