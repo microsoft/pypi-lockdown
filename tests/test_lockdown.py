@@ -10,6 +10,10 @@ import pytest
 
 from pypi_lockdown._build_standalone import _extract_wheels
 from pypi_lockdown.configure import _write_pip_config, _write_uv_config, configure
+from pypi_lockdown.standalone import (
+    _installed_packages,
+    bootstrap_keyring,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -138,3 +142,108 @@ class TestZipSlipProtection:
 
         with pytest.raises(ValueError, match="path traversal"):
             _extract_wheels(wheel_dir, staging)
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap: version-aware skip logic
+# ---------------------------------------------------------------------------
+
+
+class TestBootstrapKeyring:
+    """Test _installed_packages and bootstrap_keyring skip/warn behaviour."""
+
+    def _make_site_packages(
+        self,
+        base: Path,
+        packages: dict[str, str],
+    ) -> Path:
+        """Create a fake site-packages with .dist-info dirs and stub modules."""
+        sp = base / "site-packages"
+        sp.mkdir(parents=True)
+        for name, version in packages.items():
+            di = sp / f"{name}-{version}.dist-info"
+            di.mkdir()
+            (di / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
+            pkg_dir = sp / name
+            pkg_dir.mkdir(exist_ok=True)
+            (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
+        return sp
+
+    def test_installed_packages_parses_dist_info(self, tmp_path: Path) -> None:
+        sp = self._make_site_packages(tmp_path, {"keyring": "25.0.0"})
+        result = _installed_packages(sp)
+        assert result == {"keyring": "25.0.0"}
+
+    def test_skips_same_version(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        src = self._make_site_packages(tmp_path / "src", {"keyring": "25.6.0"})
+        dst = self._make_site_packages(tmp_path / "dst", {"keyring": "25.6.0"})
+
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._shiv_site_packages",
+            lambda: src,
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._target_site_packages",
+            lambda _p: dst,
+        )
+
+        result = bootstrap_keyring(tmp_path / "env")
+        assert result is False  # nothing new installed
+        out = capsys.readouterr().out
+        assert "Already installed" in out
+        assert "keyring-25.6.0" in out
+
+    def test_warns_on_version_mismatch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        src = self._make_site_packages(tmp_path / "src", {"keyring": "25.6.0"})
+        dst = self._make_site_packages(tmp_path / "dst", {"keyring": "25.0.0"})
+
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._shiv_site_packages",
+            lambda: src,
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._target_site_packages",
+            lambda _p: dst,
+        )
+
+        result = bootstrap_keyring(tmp_path / "env")
+        assert result is False  # skipped, not installed
+        out = capsys.readouterr().out
+        assert "Skipped" in out
+        assert "installed 25.0.0" in out
+        assert "bundled 25.6.0" in out
+
+    def test_installs_missing_package(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        src = self._make_site_packages(tmp_path / "src", {"keyring": "25.6.0"})
+        dst = tmp_path / "dst" / "site-packages"
+        dst.mkdir(parents=True)  # empty target
+
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._shiv_site_packages",
+            lambda: src,
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._target_site_packages",
+            lambda _p: dst,
+        )
+
+        result = bootstrap_keyring(tmp_path / "env")
+        assert result is True
+        out = capsys.readouterr().out
+        assert "Installed" in out
+        assert (dst / "keyring" / "__init__.py").exists()
