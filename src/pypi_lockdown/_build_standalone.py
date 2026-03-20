@@ -135,12 +135,28 @@ def _resolve_deps(package_path: Path) -> list[str]:
 
     pkg_name = "pypi_lockdown"
     reqs = []
+    resolved_names: set[str] = set()
     for item in report["install"]:
         meta = item["metadata"]
         name = meta["name"]
-        if name.replace("-", "_").lower() == pkg_name:
+        normalized = name.replace("-", "_").lower()
+        if normalized == pkg_name:
             continue
         reqs.append(f"{name}=={meta['version']}")
+        resolved_names.add(normalized)
+
+        # Collect conditional deps the native resolver skipped because
+        # the build host doesn't need them (e.g. backports.tarfile is
+        # needed on Python <3.12 but the build may run on 3.12+).
+        for req_line in meta.get("requires_dist") or []:
+            if 'python_version < "3.12"' not in req_line:
+                continue
+            dep_name = req_line.split(";")[0].strip()
+            dep_norm = dep_name.replace("-", "_").replace(".", "_").lower()
+            if dep_norm not in resolved_names:
+                reqs.append(dep_name)
+                resolved_names.add(dep_norm)
+
     return reqs
 
 
@@ -175,7 +191,9 @@ def build_cross(target: str, dist_dir: Path, pip_args: list[str] | None = None) 
             ]
         )
 
-        # Phase 2: resolve deps natively, then download each for the target
+        # Phase 2: resolve deps natively, then download each for the target.
+        # The resolver also picks up conditional deps for python_version<3.12
+        # that the build host (3.12+) wouldn't need itself.
         deps = _resolve_deps(ROOT)
         print(f"  resolved {len(deps)} dependencies: {', '.join(deps)}")
 
