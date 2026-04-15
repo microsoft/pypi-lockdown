@@ -7,11 +7,14 @@ import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
+import tomlkit
 
 from pypi_lockdown._build_standalone import _extract_wheels
 from pypi_lockdown.configure import (
     _ensure_userinfo,
     _write_pip_config,
+    _write_pyproject_poetry,
+    _write_pyproject_uv,
     _write_uv_config,
     configure,
 )
@@ -285,3 +288,189 @@ class TestBootstrapKeyring:
         out = capsys.readouterr().out
         assert "Installed" in out
         assert (dst / "keyring" / "__init__.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# pyproject.toml writers (uv + poetry)
+# ---------------------------------------------------------------------------
+
+_FEED_URL = "https://pkgs.dev.azure.com/org/proj/_packaging/feed/pypi/simple/"
+_TOKEN_FEED_URL = (
+    "https://__token__@pkgs.dev.azure.com/org/proj/_packaging/feed/pypi/simple/"  # noqa: S105
+)
+
+
+class TestPyprojectUv:
+    def test_creates_from_scratch(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text("[project]\nname = 'mypkg'\n")
+
+        _write_pyproject_uv(path, _FEED_URL)
+
+        content = path.read_text()
+        assert 'keyring-provider = "subprocess"' in content
+        assert f'url = "{_TOKEN_FEED_URL}"' in content
+        assert "default = true" in content
+        # Preserves existing content
+        assert "name = 'mypkg'" in content
+
+    def test_upserts_existing_uv_section(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            '[project]\nname = "mypkg"\n\n[tool.uv]\nsome-setting = "keep"\n'
+        )
+
+        _write_pyproject_uv(path, _FEED_URL)
+
+        content = path.read_text()
+        assert 'some-setting = "keep"' in content
+        assert 'keyring-provider = "subprocess"' in content
+        assert f'url = "{_TOKEN_FEED_URL}"' in content
+
+    def test_updates_existing_default_index(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[tool.uv]\n\n"
+            "[[tool.uv.index]]\n"
+            'url = "https://old-feed.example.com/simple/"\n'
+            "default = true\n"
+        )
+
+        _write_pyproject_uv(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        indexes = doc["tool"]["uv"]["index"]
+        assert len(indexes) == 1
+        assert indexes[0]["url"] == _TOKEN_FEED_URL
+
+
+class TestPyprojectPoetry:
+    def test_creates_from_scratch(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text("[project]\nname = 'mypkg'\n")
+
+        _write_pyproject_poetry(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        sources = doc["tool"]["poetry"]["source"]
+        assert len(sources) == 2
+        assert sources[0]["name"] == "internal"
+        assert sources[0]["url"] == _FEED_URL
+        assert sources[0]["priority"] == "primary"
+        assert sources[1]["name"] == "PyPI"
+        assert sources[1]["priority"] == "explicit"
+
+    def test_upserts_existing_internal_source(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[[tool.poetry.source]]\n"
+            'name = "internal"\n'
+            'url = "https://old.example.com/simple/"\n'
+            'priority = "primary"\n'
+            "\n"
+            "[[tool.poetry.source]]\n"
+            'name = "PyPI"\n'
+            'priority = "explicit"\n'
+        )
+
+        _write_pyproject_poetry(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        sources = doc["tool"]["poetry"]["source"]
+        assert len(sources) == 2
+        assert sources[0]["url"] == _FEED_URL
+
+    def test_adds_missing_pypi_explicit(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[[tool.poetry.source]]\n"
+            'name = "internal"\n'
+            'url = "https://old.example.com/simple/"\n'
+            'priority = "primary"\n'
+        )
+
+        _write_pyproject_poetry(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        sources = doc["tool"]["poetry"]["source"]
+        assert len(sources) == 2
+        assert sources[1]["name"] == "PyPI"
+        assert sources[1]["priority"] == "explicit"
+
+
+class TestConfigurePyprojectPrompt:
+    def test_skips_when_no_pyproject(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        # configure should not error when no pyproject.toml exists
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        configure(_FEED_URL)
+        # No pyproject.toml should exist
+        assert not (tmp_path / "pyproject.toml").exists()
+
+    def test_writes_when_confirmed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'mypkg'\n")
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt: True,
+        )
+
+        configure(_FEED_URL)
+
+        content = (tmp_path / "pyproject.toml").read_text()
+        assert "tool.uv" in content or "keyring-provider" in content
+        assert "tool.poetry" in content or "internal" in content
+
+    def test_skips_when_declined(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        original = "[project]\nname = 'mypkg'\n"
+        (tmp_path / "pyproject.toml").write_text(original)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt: False,
+        )
+
+        configure(_FEED_URL)
+
+        assert (tmp_path / "pyproject.toml").read_text() == original

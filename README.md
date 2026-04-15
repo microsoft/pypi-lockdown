@@ -25,24 +25,63 @@ python -m pypi_lockdown \
 pip install requests   # resolved from PRIVATE_FEED, authenticated via artifacts-keyring
 ```
 
+### Standalone `.pyz` (no pip required)
+
+For environments where you can't `pip install` first, download a pre-built
+`.pyz` zipapp from the [GitHub Releases](../../releases) page:
+
+```bash
+python pypi-lockdown-linux-x86_64-0.1.0.pyz \
+    https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
+```
+
+This writes pip/uv config files **and** installs `artifacts-keyring-nofuss`
+plus all its dependencies into the active environment — no network access to
+any package feed required.
+
+> `.pyz` files are platform-specific (Linux, macOS, Windows) because
+> `cryptography` contains native extensions.  Download the one matching your
+> target platform.
+
 ## What it does
 
 `pypi-lockdown` writes configuration files that redirect the default package
 index:
 
-| Tool    | Scope               | File written                                    |
-|---------|---------------------|-------------------------------------------------|
-| **pip** | environment (default) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
-| **pip** | user (fallback)     | `~/.config/pip/pip.conf` (platform-aware)       |
-| **uv**  | user                | `~/.config/uv/uv.toml` (platform-aware)        |
+| Tool       | Scope                 | File written                                    |
+|------------|----------------------|-------------------------------------------------|
+| **pip**    | environment (default) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
+| **pip**    | user (fallback)      | `~/.config/pip/pip.conf` (platform-aware)       |
+| **uv**     | user                 | `~/.config/uv/uv.toml` (platform-aware)        |
+| **uv**     | project (prompted)   | `./pyproject.toml` `[tool.uv]` section          |
+| **Poetry** | project (prompted)   | `./pyproject.toml` `[[tool.poetry.source]]`     |
 
-Poetry requires per-project configuration — the tool prints the exact
-commands and TOML snippet to add.
+When run inside a project directory (containing `pyproject.toml`), the tool
+offers to configure uv and Poetry settings directly in the project file —
+including `keyring-provider` and index URLs with the `__token__@` prefix that
+uv requires for keyring authentication.
 
 Works with **venv**, **conda**, and any other environment manager that sets
 `VIRTUAL_ENV` or `CONDA_PREFIX`.
 
-## Options
+### Platform-specific config paths
+
+| Tool | Linux                       | macOS                                         | Windows              |
+|------|-----------------------------|-----------------------------------------------|----------------------|
+| pip  | `~/.config/pip/pip.conf`    | `~/Library/Application Support/pip/pip.conf`  | `%APPDATA%\pip\pip.ini` |
+| uv   | `~/.config/uv/uv.toml`     | `~/Library/Application Support/uv/uv.toml`   | `%APPDATA%\uv\uv.toml` |
+
+### Manual Poetry setup
+
+If you run `pypi-lockdown` outside a project directory (no `pyproject.toml`),
+or decline the prompt, you can configure Poetry manually:
+
+```bash
+poetry source add --priority=primary internal https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
+poetry source add --priority=explicit PyPI
+```
+
+## CLI reference
 
 ```
 python -m pypi_lockdown [configure] INDEX_URL [--user]
@@ -56,8 +95,8 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 
 | Flag     | Effect |
 |----------|--------|
-| *(none)* | Writes pip config into the active Python environment. Falls back to user home when no environment is detected. Always writes uv config to user home. |
-| `--user` | Forces pip config to the user home directory even when an environment is active. |
+| *(none)* | Target the active environment; prompt to update `pyproject.toml` if present. |
+| `--user` | Write pip config to user home instead of the active environment. |
 
 ## Creating team-specific wrapper packages
 
@@ -87,58 +126,11 @@ pip install ai4s-pypi-lockdown --index-url https://pkgs.dev.azure.com/.../PUBLIC
 python -m ai4s_pypi_lockdown
 ```
 
-## Standalone `.pyz` distribution
-
-For environments where you can't (or don't want to) `pip install` first,
-download a pre-built standalone `.pyz` zipapp from the
-[GitHub Releases](../../releases) page.  The `.pyz` bundles pypi-lockdown,
-`artifacts-keyring-nofuss`, and all transitive dependencies — including the
-keyring, which gets auto-installed into the target environment.
-
-> **Note:** `.pyz` files are platform-specific because `cryptography` (a
-> transitive keyring dependency on Linux) contains native extensions.
-> Download the one matching your target platform.
-
-### Use
-
-```bash
-# Download the .pyz for your platform from GitHub Releases
-python pypi-lockdown-linux-x86_64-0.1.0.pyz \
-    https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
-```
-
-This writes pip/uv config files **and** installs `artifacts-keyring-nofuss`
-plus all its dependencies into the active Python environment — no network
-access to any package feed required.
-
-### Wrapper `.pyz` files
-
-Scaffolded wrapper packages include a `tox.ini` and can build their own
-standalone `.pyz` files the same way:
+Scaffolded packages can also build their own standalone `.pyz` files:
 
 ```bash
 cd ai4s-pypi-lockdown
 tox -e standalone       # builds ai4s-pypi-lockdown-{platform}.pyz
-```
-
-End users just run the wrapper `.pyz` — the feed URL is hardcoded, zero config
-needed.
-
-## User-home config locations
-
-| Tool | Linux                       | macOS                                         | Windows              |
-|------|-----------------------------|-----------------------------------------------|----------------------|
-| pip  | `~/.config/pip/pip.conf`    | `~/Library/Application Support/pip/pip.conf`  | `%APPDATA%\pip\pip.ini` |
-| uv   | `~/.config/uv/uv.toml`     | `~/Library/Application Support/uv/uv.toml`   | `%APPDATA%\uv\uv.toml` |
-
-## Manual Poetry setup
-
-Poetry sources are configured per project.  After running `pypi-lockdown`,
-follow the printed instructions in each Poetry project directory:
-
-```bash
-poetry source add --priority=primary internal https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
-poetry source add --priority=explicit PyPI
 ```
 
 ## Creating a release

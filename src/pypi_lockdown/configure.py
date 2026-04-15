@@ -115,18 +115,110 @@ def _print_poetry_instructions(index_url: str) -> None:
         "\n"
         f"    poetry source add --priority=primary internal {index_url}\n"
         "    poetry source add --priority=explicit PyPI\n"
-        "\n"
-        "  Or add to pyproject.toml manually:\n"
-        "\n"
-        "    [[tool.poetry.source]]\n"
-        '    name = "internal"\n'
-        f'    url = "{index_url}"\n'
-        '    priority = "primary"\n'
-        "\n"
-        "    [[tool.poetry.source]]\n"
-        '    name = "PyPI"\n'
-        '    priority = "explicit"\n'
     )
+
+
+# ---------------------------------------------------------------------------
+# pyproject.toml writers (uv + poetry)
+# ---------------------------------------------------------------------------
+
+
+def _write_pyproject_uv(path: Path, index_url: str) -> None:
+    """Upsert ``[tool.uv]`` settings in an existing ``pyproject.toml``."""
+    import tomlkit  # noqa: PLC0415
+
+    uv_url = _ensure_userinfo(index_url)
+    doc = tomlkit.parse(path.read_text())
+
+    tool = doc.setdefault("tool", {})
+    uv = tool.setdefault("uv", {})
+
+    uv["keyring-provider"] = "subprocess"
+
+    # Upsert [[tool.uv.index]] — find an existing default or matching URL
+    indexes = uv.setdefault("index", tomlkit.aot())
+    found = False
+    for idx in indexes:
+        if idx.get("default") or idx.get("url") == uv_url:
+            idx["url"] = uv_url
+            idx["default"] = True
+            found = True
+            break
+    if not found:
+        entry = tomlkit.table()
+        entry.add("url", uv_url)
+        entry.add("default", True)  # noqa: FBT003
+        indexes.append(entry)
+
+    path.write_text(tomlkit.dumps(doc))
+    print(f"  ✓ {path} ([tool.uv])")
+
+
+def _write_pyproject_poetry(path: Path, index_url: str) -> None:
+    """Upsert ``[[tool.poetry.source]]`` entries in an existing ``pyproject.toml``."""
+    import tomlkit  # noqa: PLC0415
+
+    doc = tomlkit.parse(path.read_text())
+
+    tool = doc.setdefault("tool", {})
+    poetry = tool.setdefault("poetry", {})
+    sources = poetry.setdefault("source", tomlkit.aot())
+
+    # Upsert internal source
+    internal_found = False
+    for src in sources:
+        if src.get("name") == "internal" or src.get("priority") == "primary":
+            src["name"] = "internal"
+            src["url"] = index_url
+            src["priority"] = "primary"
+            internal_found = True
+            break
+    if not internal_found:
+        entry = tomlkit.table()
+        entry.add("name", "internal")
+        entry.add("url", index_url)
+        entry.add("priority", "primary")
+        sources.append(entry)
+
+    # Ensure PyPI explicit source exists
+    pypi_found = any(src.get("name") == "PyPI" for src in sources)
+    if not pypi_found:
+        entry = tomlkit.table()
+        entry.add("name", "PyPI")
+        entry.add("priority", "explicit")
+        sources.append(entry)
+
+    path.write_text(tomlkit.dumps(doc))
+    print(f"  ✓ {path} ([[tool.poetry.source]])")
+
+
+def _prompt_yes_no(prompt: str) -> bool:
+    """Prompt the user for yes/no confirmation. Returns True for yes."""
+    import sys  # noqa: PLC0415
+
+    if not sys.stdin.isatty():
+        return False
+    try:
+        answer = input(f"  {prompt} [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer in ("", "y", "yes")
+
+
+def _configure_pyproject(index_url: str) -> None:
+    """Detect pyproject.toml in cwd and offer to configure uv + poetry."""
+    pyproject = Path.cwd() / "pyproject.toml"
+    if not pyproject.exists():
+        return
+
+    print(f"\n  Found {pyproject}")
+    if not _prompt_yes_no("Write uv/poetry config to pyproject.toml?"):
+        return
+
+    print()
+    _write_pyproject_uv(pyproject, index_url)
+    _write_pyproject_poetry(pyproject, index_url)
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +260,13 @@ def configure(index_url: str, *, user_scope: bool = False) -> None:
             print()
             bootstrap_keyring(env)
 
-    # --- poetry ---
-    _print_poetry_instructions(index_url)
+    # --- project-level pyproject.toml (uv + poetry) ---
+    _configure_pyproject(index_url)
+
+    # --- poetry fallback instructions ---
+    pyproject = Path.cwd() / "pyproject.toml"
+    if not pyproject.exists():
+        _print_poetry_instructions(index_url)
 
     print("artifacts-keyring will handle authentication transparently.")
     print()

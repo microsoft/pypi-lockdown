@@ -11,6 +11,7 @@ requires-python = ">=3.9"
 license = "MIT"
 dependencies = [
     "artifacts-keyring-nofuss>=0.6.0",
+    "tomlkit>=0.12",
     # jaraco.context needs this on <3.12 but pip's cross-platform resolver
     # silently drops it with --only-binary — declare it explicitly so the
     # standalone .pyz build includes it.
