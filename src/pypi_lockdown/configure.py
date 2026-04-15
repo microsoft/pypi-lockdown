@@ -73,18 +73,35 @@ def _write_pip_config(path: Path, index_url: str) -> None:
     print(f"  \u2713 {path}")
 
 
+def _ensure_userinfo(url: str) -> str:
+    """Inject ``__token__@`` into the URL if no userinfo is present.
+
+    uv requires a username in the URL to trigger keyring lookup.
+    """
+    from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
+
+    parsed = urlparse(url)
+    if parsed.username:
+        return url
+    netloc = f"__token__@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
 def _write_uv_config(path: Path, index_url: str) -> None:
+    uv_url = _ensure_userinfo(index_url)
     content = (
         _MARKER
         + "\n"
         + 'keyring-provider = "subprocess"\n'
         + "\n"
         + "[[index]]\n"
-        + f'url = "{index_url}"\n'
+        + f'url = "{uv_url}"\n'
         + "default = true\n"
         + "\n"
         + "[pip]\n"
-        + f'index-url = "{index_url}"\n'
+        + f'index-url = "{uv_url}"\n'
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)

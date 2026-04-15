@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pypi_lockdown._build_standalone import _extract_wheels
-from pypi_lockdown.configure import _write_pip_config, _write_uv_config, configure
+from pypi_lockdown.configure import (
+    _ensure_userinfo,
+    _write_pip_config,
+    _write_uv_config,
+    configure,
+)
 from pypi_lockdown.standalone import (
     _installed_packages,
     bootstrap_keyring,
@@ -101,8 +106,41 @@ class TestUvConfigWriting:
         _write_uv_config(path, "https://example.com/simple/")
         assert path.exists()
         content = path.read_text()
-        assert 'url = "https://example.com/simple/"' in content
+        assert 'url = "https://__token__@example.com/simple/"' in content
         assert "default = true" in content
+        assert 'keyring-provider = "subprocess"' in content
+
+    def test_preserves_existing_userinfo(self, tmp_path: Path) -> None:
+        path = tmp_path / "uv.toml"
+        _write_uv_config(path, "https://user@example.com/simple/")
+        content = path.read_text()
+        assert 'url = "https://user@example.com/simple/"' in content
+
+
+class TestEnsureUserinfo:
+    def test_injects_token(self) -> None:
+        assert (
+            _ensure_userinfo(
+                "https://pkgs.dev.azure.com/org/proj/_packaging/feed/pypi/simple/"
+            )
+            == "https://__token__@pkgs.dev.azure.com/org/proj/_packaging/feed/pypi/simple/"
+        )
+
+    def test_preserves_existing_username(self) -> None:
+        url = "https://user@pkgs.dev.azure.com/org/proj/_packaging/feed/pypi/simple/"
+        assert _ensure_userinfo(url) == url
+
+    def test_preserves_token_username(self) -> None:
+        url = (
+            "https://__token__@pkgs.dev.azure.com/org/proj/_packaging/feed/pypi/simple/"
+        )
+        assert _ensure_userinfo(url) == url
+
+    def test_preserves_port(self) -> None:
+        assert (
+            _ensure_userinfo("https://example.com:8080/simple/")
+            == "https://__token__@example.com:8080/simple/"
+        )
 
 
 # ---------------------------------------------------------------------------

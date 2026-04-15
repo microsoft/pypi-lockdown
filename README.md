@@ -89,37 +89,21 @@ python -m ai4s_pypi_lockdown
 
 ## Standalone `.pyz` distribution
 
-For environments where you can't (or don't want to) `pip install` first, build
-a standalone zipapp using [shiv](https://github.com/linkedin/shiv).  The `.pyz`
-bundles pypi-lockdown, `artifacts-keyring-nofuss`, and all transitive
-dependencies — including the keyring, which gets auto-installed into the target
-environment.
-
-### Build
-
-```bash
-pip install 'pypi-lockdown[build]'          # install shiv + tox
-
-# Build for all platforms from a single machine
-tox -e standalone                            # → dist/pypi-lockdown-{platform}.pyz
-
-# Or build for the current platform only
-tox -e standalone -- native                  # → dist/pypi-lockdown.pyz
-
-# Or build for a specific platform
-tox -e standalone -- linux-x86_64            # → dist/pypi-lockdown-linux-x86_64.pyz
-```
+For environments where you can't (or don't want to) `pip install` first,
+download a pre-built standalone `.pyz` zipapp from the
+[GitHub Releases](../../releases) page.  The `.pyz` bundles pypi-lockdown,
+`artifacts-keyring-nofuss`, and all transitive dependencies — including the
+keyring, which gets auto-installed into the target environment.
 
 > **Note:** `.pyz` files are platform-specific because `cryptography` (a
-> transitive keyring dependency on Linux) contains native extensions.  Cross-
-> building uses `pip download --platform` so all variants can be built from a
-> single machine.
+> transitive keyring dependency on Linux) contains native extensions.
+> Download the one matching your target platform.
 
 ### Use
 
 ```bash
-# Download the .pyz for your platform (from a shared drive, internal server, etc.)
-python pypi-lockdown.pyz \
+# Download the .pyz for your platform from GitHub Releases
+python pypi-lockdown-linux-x86_64-0.1.0.pyz \
     https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
 ```
 
@@ -159,33 +143,24 @@ poetry source add --priority=explicit PyPI
 
 ## Creating a release
 
-Tag the repo and run the release script to build `.pyz` artifacts for all
-platforms and publish a GitHub release:
+Create a GitHub release — the CI workflow builds `.pyz` artifacts for all
+platforms and attaches them automatically:
 
 ```bash
-git tag v1.0.0
-./scripts/release.sh v1.0.0
+gh release create v1.0.0 --generate-notes
 ```
 
-The script runs `tox -e standalone` (cross-builds for linux-x86_64,
-macOS-universal2, win-amd64) then calls `gh release create` with all `.pyz`
-files.
-
-> The build needs `artifacts-keyring-nofuss` resolvable by pip.  If your
-> user-level pip config isn't set up, pass feed access via the `PIP_ARGS`
-> env variable:
-> ```bash
-> PIP_ARGS="--extra-index-url https://pkgs.dev.azure.com/.../pypi/simple/" ./scripts/release.sh v1.0.0
-> ```
+To build locally instead (e.g. for testing), see `scripts/release.sh` and
+`tox -e standalone`.
 
 ## Security model
 
 - **HTTPS required**: `configure` rejects non-HTTPS index URLs — HTTP would expose
   credentials and package content to network observers.
 - **Standalone `.pyz` integrity**: The `.pyz` zipapp is the trust root when
-  bootstrapping without network access. Distribute it via a trusted channel (internal
-  file share, signed release artifact). Once extracted, packages are verified against
-  their bundled `.dist-info` metadata.
+  bootstrapping without network access. Release artifacts are built in CI with
+  [signed build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
+  — verify with `gh attestation verify <file> --owner msr-central`.
 - **Build-time zip-slip protection**: Wheel extraction during `.pyz` builds validates
   that no archive entry escapes the staging directory.
 - **Narrow config scope**: `pypi-lockdown` only writes `index-url` to pip/uv config
