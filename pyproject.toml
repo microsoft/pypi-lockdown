@@ -17,7 +17,7 @@ dependencies = [
     "backports.tarfile; python_version < '3.12'",
 ]
 
-[tool.setuptools-scm]
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 where = ["src"]

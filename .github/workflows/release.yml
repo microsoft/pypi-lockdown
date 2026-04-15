@@ -18,6 +18,8 @@ jobs:
         platform: [linux-x86_64, macos-universal2, win-amd64]
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # setuptools-scm needs tags for versioning
 
       - uses: actions/setup-python@v6
         with:
@@ -29,7 +31,14 @@ jobs:
       - name: Build .pyz for ${{ matrix.platform }}
         run: tox -e standalone -- ${{ matrix.platform }}
 
-      - uses: actions/attest-build-provenance@v2
+      - name: Rename artifact to include version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for f in dist/*.pyz; do
+            mv "$f" "${f%.pyz}-${version}.pyz"
+          done
+
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.pyz
 
