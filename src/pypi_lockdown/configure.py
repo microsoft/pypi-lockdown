@@ -77,6 +77,8 @@ def _write_uv_config(path: Path, index_url: str) -> None:
     content = (
         _MARKER
         + "\n"
+        + 'keyring-provider = "subprocess"\n'
+        + "\n"
         + "[[index]]\n"
         + f'url = "{index_url}"\n'
         + "default = true\n"

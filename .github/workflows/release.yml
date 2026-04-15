@@ -1,4 +1,4 @@
-name: Release to PyPI
+name: Release
 
 on:
   push:
@@ -7,12 +7,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # for trusted publishing
   attestations: write  # for build provenance attestations
+  id-token: write  # for attestation signing
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux-x86_64, macos-universal2, win-amd64]
     steps:
       - uses: actions/checkout@v6
 
@@ -21,40 +24,34 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: pip install build
+        run: pip install tox shiv build
 
-      - name: Build package
-        run: python -m build
+      - name: Build .pyz for ${{ matrix.platform }}
+        run: tox -e standalone -- ${{ matrix.platform }}
 
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/*
+          subject-path: dist/*.pyz
 
       - uses: actions/upload-artifact@v7
         with:
-          name: dist
-          path: dist/
+          name: pyz-${{ matrix.platform }}
+          path: dist/*.pyz
 
-  # Publish to PyPI and attach assets to the GitHub Release.
-  # The release must already exist (created via `gh release create vX.Y.Z`).
-  publish:
+  release:
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: write  # for uploading release assets
-      id-token: write  # for trusted publishing
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: dist
+          pattern: pyz-*
+          merge-multiple: true
           path: dist/
 
       - name: Upload assets to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "${{ github.ref_name }}" dist/* --clobber
-
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        if: false  # TODO: enable once trusted publishing is configured
+        run: gh release upload "${{ github.ref_name }}" dist/*.pyz --clobber
