@@ -25,13 +25,15 @@ python -m pypi_lockdown \
 pip install requests   # resolved from PRIVATE_FEED, authenticated via artifacts-keyring
 ```
 
-### Standalone `.pyz` (no pip required)
+### Standalone `.pyz` (build locally)
 
-For environments where you can't `pip install` first, download a pre-built
-`.pyz` zipapp from the [GitHub Releases](../../releases) page:
+For environments where you can't `pip install` first, you can build a
+standalone `.pyz` zipapp that bundles all dependencies:
 
 ```bash
-python pypi-lockdown-linux-x86_64-0.1.0.pyz \
+pip install tox shiv
+tox -e standalone -- linux-x86_64    # or macos-universal2, win-amd64
+python dist/pypi-lockdown-linux-x86_64.pyz \
     https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
 ```
 
@@ -40,8 +42,7 @@ plus all its dependencies into the active environment — no network access to
 any package feed required.
 
 > `.pyz` files are platform-specific (Linux, macOS, Windows) because
-> `cryptography` contains native extensions.  Download the one matching your
-> target platform.
+> `cryptography` contains native extensions.
 
 ## What it does
 
@@ -135,26 +136,30 @@ tox -e standalone       # builds ai4s-pypi-lockdown-{platform}.pyz
 
 ## Creating a release
 
-Create a GitHub release — the CI workflow builds `.pyz` artifacts for all
-platforms and attaches them automatically:
+Create a GitHub release — the CI workflow builds a wheel and sdist, attaches
+them to the release, and publishes to the ADO PyPI feed:
 
 ```bash
 gh release create v1.0.0 --generate-notes
 ```
 
-To build locally instead (e.g. for testing), see `scripts/release.sh` and
-`tox -e standalone`.
+To build a standalone `.pyz` locally (e.g. for air-gapped environments):
+
+```bash
+pip install tox shiv
+tox -e standalone -- linux-x86_64    # or macos-universal2, win-amd64
+```
 
 ## Security model
 
 - **HTTPS required**: `configure` rejects non-HTTPS index URLs — HTTP would expose
   credentials and package content to network observers.
-- **Standalone `.pyz` integrity**: The `.pyz` zipapp is the trust root when
-  bootstrapping without network access. Release artifacts are built in CI with
+- **Build provenance**: Wheel and sdist releases are built in CI with
   [signed build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
-  — verify with `gh attestation verify <file> --owner msr-central`.
-- **Build-time zip-slip protection**: Wheel extraction during `.pyz` builds validates
-  that no archive entry escapes the staging directory.
+  — verify with `gh attestation verify <file> --owner microsoft`.
+- **Standalone `.pyz` integrity**: When building `.pyz` locally for air-gapped
+  use, the build includes zip-slip protection that validates no archive entry
+  escapes the staging directory.
 - **Narrow config scope**: `pypi-lockdown` only writes `index-url` to pip/uv config
   files. It does not modify global Python settings or install hooks.
 

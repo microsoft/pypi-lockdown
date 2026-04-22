@@ -1,0 +1,42 @@
+---
+name: Bug report
+description: Report something that isn't working as expected
+labels: [bug]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: Command run
+      placeholder: "python -m pypi_lockdown https://pkgs.dev.azure.com/..."
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the full error message or unexpected output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: "OS, Python version, pip/uv version"
+      placeholder: "Ubuntu 24.04, Python 3.12, uv 0.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - pip install (wheel)
+        - Standalone .pyz
+    validations:
+      required: true

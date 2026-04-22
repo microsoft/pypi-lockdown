@@ -7,8 +7,25 @@ name = "pypi-lockdown"
 dynamic = ["version"]
 description = "Bootstrap Python environments to use internal PyPI feeds"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
+authors = [
+    { name = "Hannes Schulz", email = "hannes.schulz@microsoft.com" },
+]
+keywords = ["pip", "uv", "pypi", "azure-devops", "artifacts", "keyring", "bootstrap"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Installation/Setup",
+]
 dependencies = [
     "artifacts-keyring-nofuss>=0.6.0",
     "tomlkit>=0.12",
@@ -18,10 +35,10 @@ dependencies = [
     "backports.tarfile; python_version < '3.12'",
 ]
 
-[tool.setuptools_scm]
-
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.urls]
+Homepage = "https://github.com/microsoft/pypi-lockdown"
+Repository = "https://github.com/microsoft/pypi-lockdown"
+Issues = "https://github.com/microsoft/pypi-lockdown/issues"
 
 [project.optional-dependencies]
 build = ["shiv", "tox"]
@@ -34,8 +51,13 @@ dev = [
 [project.scripts]
 pypi-lockdown = "pypi_lockdown.__main__:main"
 
+[tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["ALL"]

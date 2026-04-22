@@ -31,36 +31,92 @@ jobs:
       - name: Build .pyz for ${{ matrix.platform }}
         run: tox -e standalone -- ${{ matrix.platform }}
 
-      - name: Rename artifact to include version
+      # .pyz files are not published (they bundle third-party code) but we
+      # keep the build as a CI check.  To distribute .pyz files, build
+      # locally with: tox -e standalone -- <platform>
+
+  build-python-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # setuptools-scm needs tags for versioning
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel and sdist
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          for f in dist/*.pyz; do
-            mv "$f" "${f%.pyz}-${version}.pyz"
-          done
+          pip install build
+          python -m build
 
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/*.pyz
+          subject-path: dist/*
 
       - uses: actions/upload-artifact@v7
         with:
-          name: pyz-${{ matrix.platform }}
-          path: dist/*.pyz
+          name: python-dist
+          path: dist/
 
   release:
-    needs: build
+    needs: [build, build-python-dist]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # for uploading release assets
     steps:
       - uses: actions/download-artifact@v7
         with:
-          pattern: pyz-*
-          merge-multiple: true
+          name: python-dist
           path: dist/
 
-      - name: Upload assets to GitHub Release
+      - name: Upload wheel and sdist to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "${{ github.ref_name }}" dist/*.pyz --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/* --clobber
+
+  publish-ado:
+    if: github.repository == 'microsoft/pypi-lockdown'
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # for OIDC token exchange
+    environment: ado-publish  # deployment approvals required for publishing
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: python-dist
+          path: dist/
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Azure DevOps token
+        id: ado-token
+        run: |
+          token=$(az account get-access-token \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query accessToken -o tsv)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to ADO feed
+        env:
+          TWINE_USERNAME: AzureDevOps
+          TWINE_PASSWORD: ${{ steps.ado-token.outputs.token }}
+        run: |
+          pip install twine
+          twine upload \
+            --repository-url https://pkgs.dev.azure.com/pypi-lockdown/_packaging/pypi-lockdown/pypi/upload/ \
+            dist/*

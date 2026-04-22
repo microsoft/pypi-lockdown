@@ -1,0 +1,3 @@
+# Require maintainer review for publishing and packaging config
+.github/workflows/release.yml  @microsoft/pypi-lockdown-maintainers
+pyproject.toml                  @microsoft/pypi-lockdown-maintainers
