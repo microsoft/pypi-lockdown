@@ -71,11 +71,11 @@ jobs:
           name: python-dist
           path: dist/
 
-      - name: Upload wheel and sdist to GitHub Release
+      - name: Create GitHub Release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "${{ github.ref_name }}" dist/* --clobber
+        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes
 
   publish-pypi:
     if: github.repository == 'microsoft/pypi-lockdown'
