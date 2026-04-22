@@ -77,6 +77,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: gh release upload "${{ github.ref_name }}" dist/* --clobber
 
+  publish-pypi:
+    if: github.repository == 'microsoft/pypi-lockdown'
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # for PyPI trusted publishing (OIDC)
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: python-dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
   publish-ado:
     if: github.repository == 'microsoft/pypi-lockdown'
     needs: release
