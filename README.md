@@ -1,5 +1,10 @@
 # pypi-lockdown
 
+[![CI](https://github.com/microsoft/pypi-lockdown/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/pypi-lockdown/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pypi-lockdown)](https://pypi.org/project/pypi-lockdown/)
+[![Python](https://img.shields.io/pypi/pyversions/pypi-lockdown)](https://pypi.org/project/pypi-lockdown/)
+[![License](https://img.shields.io/github/license/microsoft/pypi-lockdown)](LICENSE)
+
 Bootstrap a Python environment so that **all** packages are pulled from an
 internal, authenticated PyPI feed.  Install this package first, then every
 subsequent `pip install` / `uv add` will use the configured feed — with
