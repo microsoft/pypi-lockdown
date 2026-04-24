@@ -315,8 +315,10 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
     if env and not user_scope:
         from .standalone import bootstrap_keyring  # noqa: PLC0415
 
+        print(f"Bootstrapping keyring packages into {env} ...")
+        if not bootstrap_keyring(env):
+            print("  Already up to date.")
         print()
-        bootstrap_keyring(env)
 
     # --- project-level pyproject.toml (uv + poetry) ---
     if not ci:
