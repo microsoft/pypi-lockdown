@@ -34,6 +34,8 @@ def detect_index_url() -> str | None:
     except (OSError, tomlkit.exceptions.TOMLKitError):
         return None
     tool = doc.get("tool", {})
+    if not isinstance(tool, dict):
+        return None
 
     # Try uv indexes first
     uv = tool.get("uv", {})
