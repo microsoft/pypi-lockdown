@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import sys
 
@@ -26,7 +28,7 @@ def main() -> None:
         default=None,
         help=(
             "Internal feed URL. If omitted, auto-detected from"
-            " pyproject.toml ([tool.uv.index] or [tool.poetry.source])."
+            " pyproject.toml ([[tool.uv.index]] or [[tool.poetry.source]])."
         ),
     )
     p_configure.add_argument(
@@ -80,8 +82,8 @@ def main() -> None:
 
     args = parser.parse_args(argv)
 
-    if args.command == "configure":
-        index_url = args.index_url
+    if args.command == "configure" or args.command is None:
+        index_url = getattr(args, "index_url", None)
         if index_url is None:
             index_url = detect_index_url()
             if index_url is None:
@@ -90,8 +92,12 @@ def main() -> None:
                     " feed was found in the current directory)"
                 )
             print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
-        configure(index_url, user_scope=args.user, ci=args.ci)
-        if args.verify:
+        configure(
+            index_url,
+            user_scope=getattr(args, "user", False),
+            ci=getattr(args, "ci", False),
+        )
+        if getattr(args, "verify", False):
             verify(index_url)
     elif args.command == "verify":
         verify(args.index_url)

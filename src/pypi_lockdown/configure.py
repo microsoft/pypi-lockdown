@@ -29,20 +29,27 @@ def detect_index_url() -> str | None:
 
     import tomlkit  # noqa: PLC0415
 
-    doc = tomlkit.parse(pyproject.read_text())
+    try:
+        doc = tomlkit.parse(pyproject.read_text())
+    except (OSError, tomlkit.exceptions.TOMLKitError):
+        return None
     tool = doc.get("tool", {})
 
     # Try uv indexes first
     uv = tool.get("uv", {})
     for idx in uv.get("index", []):
         if idx.get("default"):
-            return _strip_userinfo(str(idx["url"]))
+            url = idx.get("url")
+            if url:
+                return _strip_userinfo(str(url))
 
     # Fall back to poetry sources
     poetry = tool.get("poetry", {})
     for src in poetry.get("source", []):
         if src.get("priority") == "primary":
-            return _strip_userinfo(str(src["url"]))
+            url = src.get("url")
+            if url:
+                return _strip_userinfo(str(url))
 
     return None
 
@@ -52,11 +59,9 @@ def _strip_userinfo(url: str) -> str:
     from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
 
     parsed = urlparse(url)
-    if not parsed.username:
+    if "@" not in parsed.netloc:
         return url
-    netloc = parsed.hostname or ""
-    if parsed.port:
-        netloc += f":{parsed.port}"
+    netloc = parsed.netloc.rsplit("@", 1)[1]
     return urlunparse(parsed._replace(netloc=netloc))
 
 
