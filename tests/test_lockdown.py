@@ -985,7 +985,15 @@ class TestPipxEndToEnd:
             "VIRTUAL_ENV": str(user_venv),
             "HOME": str(fake_home),
             "XDG_CONFIG_HOME": str(fake_home / ".config"),
-            **({"USERPROFILE": str(fake_home)} if sys.platform == "win32" else {}),
+            **(
+                {
+                    "USERPROFILE": str(fake_home),
+                    "APPDATA": str(fake_home / "AppData" / "Roaming"),
+                    "LOCALAPPDATA": str(fake_home / "AppData" / "Local"),
+                }
+                if sys.platform == "win32"
+                else {}
+            ),
         }
         feed_url = (
             "https://pkgs.dev.azure.com/pypi-lockdown"

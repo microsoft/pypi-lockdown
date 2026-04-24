@@ -175,8 +175,8 @@ def _is_pure_python(site_packages: Path, normalised_name: str) -> bool:
                         if "abi3" in tag:
                             return True
                 return False
-    # No WHEEL file found -- assume pure Python (editable installs, etc.)
-    return True
+    # No WHEEL file found -- can't confirm pure Python, skip to be safe.
+    return False
 
 
 def _bare_pkg_name(spec: str) -> str:
@@ -230,7 +230,7 @@ def _should_skip(name: str) -> bool:
 
 
 def _normalise_name(name: str) -> str:
-    """PEP 503 / PEP 625 name normalization."""
+    """Return the dist-info / wheel-style normalised package name."""
     return name.lower().replace("-", "_").replace(".", "_")
 
 
