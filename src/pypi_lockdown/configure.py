@@ -309,13 +309,13 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
     # --- uv (user-level only) ---
     _write_uv_config(_uv_config_user(), index_url)
 
-    # --- standalone: bootstrap keyring into target env ---
+    # --- bootstrap keyring into target env ---
     if env:
-        from .standalone import bootstrap_keyring, is_standalone  # noqa: PLC0415
+        from .standalone import bootstrap_keyring  # noqa: PLC0415
 
-        if is_standalone():
-            print()
-            bootstrap_keyring(env)
+        print()
+        if not bootstrap_keyring(env):
+            pass  # nothing to install — already present or no source found
 
     # --- project-level pyproject.toml (uv + poetry) ---
     if not ci:
