@@ -90,20 +90,23 @@ poetry source add --priority=explicit PyPI
 ## CLI reference
 
 ```
-python -m pypi_lockdown [configure] INDEX_URL [--user] [--ci]
+python -m pypi_lockdown [configure] INDEX_URL [--user] [--ci] [--verify]
+python -m pypi_lockdown verify INDEX_URL
 python -m pypi_lockdown scaffold NAME INDEX_URL
 ```
 
 | Command      | Effect |
 |--------------|--------|
 | `configure`  | Write pip/uv config files (default when omitted). |
+| `verify`     | Test that the configured feed is reachable and authentication works. |
 | `scaffold`   | Generate a wrapper package that hardcodes a private feed URL. |
 
-| Flag     | Effect |
-|----------|--------|
-| *(none)* | Target the active environment; prompt to update `pyproject.toml` if present. |
-| `--user` | Write pip config to user home instead of the active environment. |
-| `--ci`   | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
+| Flag       | Effect |
+|------------|--------|
+| *(none)*   | Target the active environment; prompt to update `pyproject.toml` if present. |
+| `--user`   | Write pip config to user home instead of the active environment. |
+| `--ci`     | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
+| `--verify` | After configuring, verify the feed is reachable and authentication works. |
 
 ## Creating team-specific wrapper packages
 
