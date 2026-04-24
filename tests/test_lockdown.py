@@ -474,3 +474,93 @@ class TestConfigurePyprojectPrompt:
         configure(_FEED_URL)
 
         assert (tmp_path / "pyproject.toml").read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# --ci flag
+# ---------------------------------------------------------------------------
+
+
+class TestCiFlag:
+    """Tests for the ci=True (non-interactive) code path."""
+
+    def test_ci_skips_pyproject_modification(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        original = "[project]\nname = 'mypkg'\n"
+        (tmp_path / "pyproject.toml").write_text(original)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+
+        configure(_FEED_URL, ci=True)
+
+        # pyproject.toml must be untouched
+        assert (tmp_path / "pyproject.toml").read_text() == original
+        # pip and uv configs should still be written
+        assert (tmp_path / "pip" / "pip.conf").exists()
+        assert (tmp_path / "uv" / "uv.toml").exists()
+
+    def test_ci_skips_poetry_instructions(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        # No pyproject.toml — normally triggers poetry instructions
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+
+        configure(_FEED_URL, ci=True)
+
+        out = capsys.readouterr().out
+        assert "poetry source add" not in out
+
+    def test_ci_writes_pip_and_uv_configs(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+
+        configure(_FEED_URL, ci=True)
+
+        pip_conf = tmp_path / "pip" / "pip.conf"
+        assert pip_conf.exists()
+        cfg = configparser.ConfigParser()
+        cfg.read(pip_conf)
+        assert cfg.get("global", "index-url") == _FEED_URL
+
+        uv_toml = tmp_path / "uv" / "uv.toml"
+        assert uv_toml.exists()
+        content = uv_toml.read_text()
+        assert f'url = "{_TOKEN_FEED_URL}"' in content

@@ -226,7 +226,7 @@ def _configure_pyproject(index_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def configure(index_url: str, *, user_scope: bool = False) -> None:
+def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> None:
     if not index_url.startswith("https://"):
         print(
             f"\n  ✗ Refusing to configure non-HTTPS index URL: {index_url}\n"
@@ -261,12 +261,13 @@ def configure(index_url: str, *, user_scope: bool = False) -> None:
             bootstrap_keyring(env)
 
     # --- project-level pyproject.toml (uv + poetry) ---
-    _configure_pyproject(index_url)
+    if not ci:
+        _configure_pyproject(index_url)
 
-    # --- poetry fallback instructions ---
-    pyproject = Path.cwd() / "pyproject.toml"
-    if not pyproject.exists():
-        _print_poetry_instructions(index_url)
+        # --- poetry fallback instructions ---
+        pyproject = Path.cwd() / "pyproject.toml"
+        if not pyproject.exists():
+            _print_poetry_instructions(index_url)
 
     print("artifacts-keyring will handle authentication transparently.")
     print()
