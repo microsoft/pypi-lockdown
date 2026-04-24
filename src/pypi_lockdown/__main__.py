@@ -30,6 +30,14 @@ def main() -> None:
         help="Write pip config to user home instead of the active Python environment",
     )
     p_configure.add_argument(
+        "--ci",
+        action="store_true",
+        help=(
+            "Non-interactive CI mode: skip pyproject.toml modification"
+            " and poetry instructions"
+        ),
+    )
+    p_configure.add_argument(
         "--verify",
         action="store_true",
         help="After configuring, verify the feed is reachable and authentication works",
@@ -68,7 +76,7 @@ def main() -> None:
     args = parser.parse_args(argv)
 
     if args.command == "configure":
-        configure(args.index_url, user_scope=args.user)
+        configure(args.index_url, user_scope=args.user, ci=args.ci)
         if args.verify:
             verify(args.index_url)
     elif args.command == "verify":

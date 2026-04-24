@@ -90,7 +90,7 @@ poetry source add --priority=explicit PyPI
 ## CLI reference
 
 ```
-python -m pypi_lockdown [configure] INDEX_URL [--user]
+python -m pypi_lockdown [configure] INDEX_URL [--user] [--ci]
 python -m pypi_lockdown scaffold NAME INDEX_URL
 ```
 
@@ -103,6 +103,7 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 |----------|--------|
 | *(none)* | Target the active environment; prompt to update `pyproject.toml` if present. |
 | `--user` | Write pip config to user home instead of the active environment. |
+| `--ci`   | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
 
 ## Creating team-specific wrapper packages
 
