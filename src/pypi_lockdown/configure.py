@@ -127,7 +127,7 @@ def _write_pip_config(path: Path, index_url: str) -> None:
     with path.open("w") as fh:
         fh.write(_MARKER)
         cfg.write(fh)
-    print(f"  \u2713 {path}")
+    print(f"  OK {path}")
 
 
 def _ensure_userinfo(url: str) -> str:
@@ -162,7 +162,7 @@ def _write_uv_config(path: Path, index_url: str) -> None:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
-    print(f"  \u2713 {path}")
+    print(f"  OK {path}")
 
 
 def _print_poetry_instructions(index_url: str) -> None:
@@ -208,7 +208,7 @@ def _write_pyproject_uv(path: Path, index_url: str) -> None:
         indexes.append(entry)
 
     path.write_text(tomlkit.dumps(doc))
-    print(f"  ✓ {path} ([tool.uv])")
+    print(f"  OK {path} ([tool.uv])")
 
 
 def _write_pyproject_poetry(path: Path, index_url: str) -> None:
@@ -246,7 +246,7 @@ def _write_pyproject_poetry(path: Path, index_url: str) -> None:
         sources.append(entry)
 
     path.write_text(tomlkit.dumps(doc))
-    print(f"  ✓ {path} ([[tool.poetry.source]])")
+    print(f"  OK {path} ([[tool.poetry.source]])")
 
 
 def _prompt_yes_no(prompt: str) -> bool:
@@ -286,7 +286,7 @@ def _configure_pyproject(index_url: str) -> None:
 def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> None:
     if not index_url.startswith("https://"):
         print(
-            f"\n  ✗ Refusing to configure non-HTTPS index URL: {index_url}\n"
+            f"\n  ERROR: Refusing to configure non-HTTPS index URL: {index_url}\n"
             "    HTTPS is required to protect credentials and package integrity.\n"
         )
         raise SystemExit(1)

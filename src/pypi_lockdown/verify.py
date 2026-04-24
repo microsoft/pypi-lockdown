@@ -31,17 +31,17 @@ def verify(index_url: str) -> None:
             check=False,
         )
     except subprocess.TimeoutExpired:
-        print("  ✗ Verification timed out after 60 seconds.")
+        print("  FAIL Verification timed out after 60 seconds.")
         raise SystemExit(1) from None
     except FileNotFoundError:
-        print("  ✗ pip not found — cannot verify.")
+        print("  FAIL pip not found — cannot verify.")
         raise SystemExit(1) from None
 
     if result.returncode == 0:
-        print("  ✓ Feed is reachable and authentication works.")
+        print("  OK Feed is reachable and authentication works.")
         print()
     else:
-        print("  ✗ Verification failed.\n")
+        print("  FAIL Verification failed.\n")
         stderr = result.stderr.strip()
         if stderr:
             for line in stderr.splitlines():
