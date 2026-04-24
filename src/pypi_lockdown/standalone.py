@@ -22,7 +22,7 @@ from pathlib import Path
 # Packages that belong to pypi-lockdown itself and should NOT be copied
 _SKIP_PREFIXES = frozenset({"pypi_lockdown", "pypi-lockdown", "shiv", "_shiv"})
 
-# Root packages to bootstrap — their transitive deps are resolved at runtime
+# Root packages to bootstrap -- their transitive deps are resolved at runtime
 _BOOTSTRAP_ROOTS = ("artifacts-keyring-nofuss", "keyring")
 
 
@@ -141,7 +141,7 @@ def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
         name = _normalise_name(raw_name)
         if name in allowlist or name not in installed:
             continue
-        # Check purelib — skip C extensions
+        # Check purelib -- skip C extensions
         if not _is_pure_python(site_packages, name):
             continue
         allowlist.add(name)
@@ -165,11 +165,11 @@ def _is_pure_python(site_packages: Path, normalised_name: str) -> bool:
                         tag = line.split(":", 1)[1].strip()
                         if "none-any" in tag:
                             return True
-                        # abi3 is stable ABI — compatible across versions
+                        # abi3 is stable ABI -- compatible across versions
                         if "abi3" in tag:
                             return True
                 return False
-    # No WHEEL file found — assume pure Python (editable installs, etc.)
+    # No WHEEL file found -- assume pure Python (editable installs, etc.)
     return True
 
 
@@ -198,7 +198,7 @@ def _runtime_deps(site_packages: Path, normalised_name: str) -> list[str]:
                 # Skip extras: "foo ; extra == ..."
                 if "extra ==" in spec or "extra==" in spec:
                     continue
-                # Include deps with environment markers unconditionally —
+                # Include deps with environment markers unconditionally --
                 # they may be needed on the target platform, and excluding
                 # them risks missing packages.  The allowlist already
                 # filters to actually-installed packages.
@@ -434,7 +434,7 @@ def bootstrap_keyring(env_path: Path) -> bool:
         print(f"  WARNING: Target site-packages not found for: {env_path}")
         return False
 
-    # Same env — packages are already available
+    # Same env -- packages are already available
     if src.resolve() == dst.resolve():
         return False
 

@@ -7,7 +7,9 @@ import os
 import platform
 from pathlib import Path
 
-_MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on next run\n"
+_MARKER = (
+    "# Managed by pypi-lockdown -- safe to edit, will be overwritten on next run\n"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +170,7 @@ def _write_uv_config(path: Path, index_url: str) -> None:
 def _print_poetry_instructions(index_url: str) -> None:
     print(
         "\n"
-        "  Poetry (per-project — run in each Poetry project directory):\n"
+        "  Poetry (per-project -- run in each Poetry project directory):\n"
         "\n"
         f"    poetry source add --priority=primary internal {index_url}\n"
         "    poetry source add --priority=explicit PyPI\n"
@@ -192,7 +194,7 @@ def _write_pyproject_uv(path: Path, index_url: str) -> None:
 
     uv["keyring-provider"] = "subprocess"
 
-    # Upsert [[tool.uv.index]] — find an existing default or matching URL
+    # Upsert [[tool.uv.index]] -- find an existing default or matching URL
     indexes = uv.setdefault("index", tomlkit.aot())
     found = False
     for idx in indexes:
@@ -303,7 +305,7 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
         if env:
             print("Writing to user directory (--user).\n")
         else:
-            print("No Python environment detected — writing to user directory.\n")
+            print("No Python environment detected -- writing to user directory.\n")
         _write_pip_config(_pip_config_user(), index_url)
 
     # --- uv (user-level only) ---
