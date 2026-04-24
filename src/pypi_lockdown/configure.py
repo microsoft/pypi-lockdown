@@ -7,7 +7,9 @@ import os
 import platform
 from pathlib import Path
 
-_MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on next run\n"
+_MARKER = (
+    "# Managed by pypi-lockdown -- safe to edit, will be overwritten on next run\n"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +129,7 @@ def _write_pip_config(path: Path, index_url: str) -> None:
     with path.open("w") as fh:
         fh.write(_MARKER)
         cfg.write(fh)
-    print(f"  \u2713 {path}")
+    print(f"  OK {path}")
 
 
 def _ensure_userinfo(url: str) -> str:
@@ -162,13 +164,13 @@ def _write_uv_config(path: Path, index_url: str) -> None:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
-    print(f"  \u2713 {path}")
+    print(f"  OK {path}")
 
 
 def _print_poetry_instructions(index_url: str) -> None:
     print(
         "\n"
-        "  Poetry (per-project — run in each Poetry project directory):\n"
+        "  Poetry (per-project -- run in each Poetry project directory):\n"
         "\n"
         f"    poetry source add --priority=primary internal {index_url}\n"
         "    poetry source add --priority=explicit PyPI\n"
@@ -192,7 +194,7 @@ def _write_pyproject_uv(path: Path, index_url: str) -> None:
 
     uv["keyring-provider"] = "subprocess"
 
-    # Upsert [[tool.uv.index]] — find an existing default or matching URL
+    # Upsert [[tool.uv.index]] -- find an existing default or matching URL
     indexes = uv.setdefault("index", tomlkit.aot())
     found = False
     for idx in indexes:
@@ -208,7 +210,7 @@ def _write_pyproject_uv(path: Path, index_url: str) -> None:
         indexes.append(entry)
 
     path.write_text(tomlkit.dumps(doc))
-    print(f"  ✓ {path} ([tool.uv])")
+    print(f"  OK {path} ([tool.uv])")
 
 
 def _write_pyproject_poetry(path: Path, index_url: str) -> None:
@@ -246,7 +248,7 @@ def _write_pyproject_poetry(path: Path, index_url: str) -> None:
         sources.append(entry)
 
     path.write_text(tomlkit.dumps(doc))
-    print(f"  ✓ {path} ([[tool.poetry.source]])")
+    print(f"  OK {path} ([[tool.poetry.source]])")
 
 
 def _prompt_yes_no(prompt: str) -> bool:
@@ -286,7 +288,7 @@ def _configure_pyproject(index_url: str) -> None:
 def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> None:
     if not index_url.startswith("https://"):
         print(
-            f"\n  ✗ Refusing to configure non-HTTPS index URL: {index_url}\n"
+            f"\n  ERROR: Refusing to configure non-HTTPS index URL: {index_url}\n"
             "    HTTPS is required to protect credentials and package integrity.\n"
         )
         raise SystemExit(1)
@@ -303,19 +305,20 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
         if env:
             print("Writing to user directory (--user).\n")
         else:
-            print("No Python environment detected — writing to user directory.\n")
+            print("No Python environment detected -- writing to user directory.\n")
         _write_pip_config(_pip_config_user(), index_url)
 
     # --- uv (user-level only) ---
     _write_uv_config(_uv_config_user(), index_url)
 
-    # --- standalone: bootstrap keyring into target env ---
-    if env:
-        from .standalone import bootstrap_keyring, is_standalone  # noqa: PLC0415
+    # --- bootstrap keyring into target env ---
+    if env and not user_scope:
+        from .standalone import bootstrap_keyring  # noqa: PLC0415
 
-        if is_standalone():
-            print()
-            bootstrap_keyring(env)
+        print(f"Bootstrapping keyring packages into {env} ...")
+        if not bootstrap_keyring(env):
+            print("  Already up to date.")
+        print()
 
     # --- project-level pyproject.toml (uv + poetry) ---
     if not ci:
