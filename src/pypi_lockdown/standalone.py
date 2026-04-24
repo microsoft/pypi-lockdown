@@ -160,7 +160,7 @@ def _is_pure_python(site_packages: Path, normalised_name: str) -> bool:
         if parsed and parsed[0] == normalised_name:
             wheel_file = di / "WHEEL"
             if wheel_file.exists():
-                for line in wheel_file.read_text().splitlines():
+                for line in wheel_file.read_text(encoding="utf-8").splitlines():
                     if line.startswith("Tag:"):
                         tag = line.split(":", 1)[1].strip()
                         if "none-any" in tag:
@@ -191,7 +191,7 @@ def _runtime_deps(site_packages: Path, normalised_name: str) -> list[str]:
             if not metadata_file.exists():
                 return []
             deps: list[str] = []
-            for line in metadata_file.read_text().splitlines():
+            for line in metadata_file.read_text(encoding="utf-8").splitlines():
                 if not line.startswith("Requires-Dist:"):
                     continue
                 spec = line.split(":", 1)[1].strip()
@@ -340,7 +340,7 @@ def _owned_toplevel_dirs(
         # top_level.txt is the simplest source
         top_level = di / "top_level.txt"
         if top_level.exists():
-            for line in top_level.read_text().splitlines():
+            for line in top_level.read_text(encoding="utf-8").splitlines():
                 name = line.strip()
                 if name:
                     owned.add(name)
@@ -349,7 +349,7 @@ def _owned_toplevel_dirs(
         # Fallback: parse RECORD for top-level entries
         record = di / "RECORD"
         if record.exists():
-            for line in record.read_text().splitlines():
+            for line in record.read_text(encoding="utf-8").splitlines():
                 entry = line.split(",")[0]
                 if not entry or entry.startswith(di.name):
                     continue
