@@ -88,8 +88,9 @@ def main() -> None:
             index_url = detect_index_url()
             if index_url is None:
                 parser.error(
-                    "INDEX_URL is required (no pyproject.toml with a configured"
-                    " feed was found in the current directory)"
+                    "INDEX_URL is required (auto-detection from pyproject.toml"
+                    " failed; pass INDEX_URL explicitly or configure"
+                    " [[tool.uv.index]] / [[tool.poetry.source]])"
                 )
             print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
         configure(
