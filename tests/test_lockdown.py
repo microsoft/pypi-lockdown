@@ -12,11 +12,13 @@ import tomlkit
 from pypi_lockdown._build_standalone import _extract_wheels
 from pypi_lockdown.configure import (
     _ensure_userinfo,
+    _strip_userinfo,
     _write_pip_config,
     _write_pyproject_poetry,
     _write_pyproject_uv,
     _write_uv_config,
     configure,
+    detect_index_url,
 )
 from pypi_lockdown.standalone import (
     _installed_packages,
@@ -564,3 +566,91 @@ class TestCiFlag:
         assert uv_toml.exists()
         content = uv_toml.read_text()
         assert f'url = "{_TOKEN_FEED_URL}"' in content
+
+
+# ---------------------------------------------------------------------------
+# Auto-detect feed URL
+# ---------------------------------------------------------------------------
+
+
+class TestDetectIndexUrl:
+    def test_returns_none_when_no_pyproject(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert detect_index_url() is None
+
+    def test_detects_uv_default_index(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[tool.uv]\n\n"
+            "[[tool.uv.index]]\n"
+            f'url = "{_TOKEN_FEED_URL}"\n'
+            "default = true\n"
+        )
+        result = detect_index_url()
+        # Should strip __token__@ userinfo
+        assert result == _FEED_URL
+
+    def test_detects_poetry_primary_source(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[[tool.poetry.source]]\n"
+            'name = "internal"\n'
+            f'url = "{_FEED_URL}"\n'
+            'priority = "primary"\n'
+        )
+        result = detect_index_url()
+        assert result == _FEED_URL
+
+    def test_uv_takes_precedence_over_poetry(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[[tool.uv.index]]\n"
+            'url = "https://uv-feed.example.com/simple/"\n'
+            "default = true\n"
+            "\n"
+            "[[tool.poetry.source]]\n"
+            'name = "internal"\n'
+            'url = "https://poetry-feed.example.com/simple/"\n'
+            'priority = "primary"\n'
+        )
+        result = detect_index_url()
+        assert result == "https://uv-feed.example.com/simple/"
+
+    def test_returns_none_when_no_matching_index(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'mypkg'\n")
+        assert detect_index_url() is None
+
+
+class TestStripUserinfo:
+    def test_strips_token(self) -> None:
+        assert _strip_userinfo(_TOKEN_FEED_URL) == _FEED_URL
+
+    def test_preserves_url_without_userinfo(self) -> None:
+        assert _strip_userinfo(_FEED_URL) == _FEED_URL
+
+    def test_strips_custom_username(self) -> None:
+        assert (
+            _strip_userinfo("https://user@example.com:8080/simple/")
+            == "https://example.com:8080/simple/"
+        )

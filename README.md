@@ -90,7 +90,7 @@ poetry source add --priority=explicit PyPI
 ## CLI reference
 
 ```
-python -m pypi_lockdown [configure] INDEX_URL [--user] [--ci] [--verify]
+python -m pypi_lockdown [configure] [INDEX_URL] [--user] [--ci] [--verify]
 python -m pypi_lockdown verify INDEX_URL
 python -m pypi_lockdown scaffold NAME INDEX_URL
 ```
@@ -107,6 +107,20 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 | `--user`   | Write pip config to user home instead of the active environment. |
 | `--ci`     | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
 | `--verify` | After configuring, verify the feed is reachable and authentication works. |
+
+### Auto-detect feed URL
+
+When `INDEX_URL` is omitted, `pypi-lockdown` reads the current directory's
+`pyproject.toml` and looks for a configured feed:
+
+1. `[[tool.uv.index]]` entry with `default = true`
+2. `[[tool.poetry.source]]` entry with `priority = "primary"`
+
+This means after initial setup, team members can simply run:
+
+```bash
+python -m pypi_lockdown
+```
 
 ## Creating team-specific wrapper packages
 

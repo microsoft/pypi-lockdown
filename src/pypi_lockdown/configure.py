@@ -11,6 +11,63 @@ _MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on n
 
 
 # ---------------------------------------------------------------------------
+# Auto-detect
+# ---------------------------------------------------------------------------
+
+
+def detect_index_url() -> str | None:
+    """Try to read the default index URL from ``pyproject.toml`` in the cwd.
+
+    Checks ``[[tool.uv.index]]`` entries for one marked ``default = true``,
+    then falls back to ``[[tool.poetry.source]]`` with ``priority = "primary"``.
+    Returns the URL with any ``__token__@`` userinfo stripped, or *None* if
+    no feed URL could be found.
+    """
+    pyproject = Path.cwd() / "pyproject.toml"
+    if not pyproject.exists():
+        return None
+
+    import tomlkit  # noqa: PLC0415
+
+    try:
+        doc = tomlkit.parse(pyproject.read_text())
+    except (OSError, tomlkit.exceptions.TOMLKitError):
+        return None
+    tool = doc.get("tool", {})
+    if not isinstance(tool, dict):
+        return None
+
+    # Try uv indexes first
+    uv = tool.get("uv", {})
+    for idx in uv.get("index", []):
+        if idx.get("default"):
+            url = idx.get("url")
+            if url:
+                return _strip_userinfo(str(url))
+
+    # Fall back to poetry sources
+    poetry = tool.get("poetry", {})
+    for src in poetry.get("source", []):
+        if src.get("priority") == "primary":
+            url = src.get("url")
+            if url:
+                return _strip_userinfo(str(url))
+
+    return None
+
+
+def _strip_userinfo(url: str) -> str:
+    """Remove userinfo (e.g. ``__token__@``) from a URL."""
+    from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
+
+    parsed = urlparse(url)
+    if "@" not in parsed.netloc:
+        return url
+    netloc = parsed.netloc.rsplit("@", 1)[1]
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+# ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
 
