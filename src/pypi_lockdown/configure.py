@@ -11,6 +11,56 @@ _MARKER = "# Managed by pypi-lockdown — safe to edit, will be overwritten on n
 
 
 # ---------------------------------------------------------------------------
+# Auto-detect
+# ---------------------------------------------------------------------------
+
+
+def detect_index_url() -> str | None:
+    """Try to read the default index URL from ``pyproject.toml`` in the cwd.
+
+    Checks ``[[tool.uv.index]]`` entries for one marked ``default = true``,
+    then falls back to ``[[tool.poetry.source]]`` with ``priority = "primary"``.
+    Returns the URL with any ``__token__@`` userinfo stripped, or *None* if
+    no feed URL could be found.
+    """
+    pyproject = Path.cwd() / "pyproject.toml"
+    if not pyproject.exists():
+        return None
+
+    import tomlkit  # noqa: PLC0415
+
+    doc = tomlkit.parse(pyproject.read_text())
+    tool = doc.get("tool", {})
+
+    # Try uv indexes first
+    uv = tool.get("uv", {})
+    for idx in uv.get("index", []):
+        if idx.get("default"):
+            return _strip_userinfo(str(idx["url"]))
+
+    # Fall back to poetry sources
+    poetry = tool.get("poetry", {})
+    for src in poetry.get("source", []):
+        if src.get("priority") == "primary":
+            return _strip_userinfo(str(src["url"]))
+
+    return None
+
+
+def _strip_userinfo(url: str) -> str:
+    """Remove userinfo (e.g. ``__token__@``) from a URL."""
+    from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
+
+    parsed = urlparse(url)
+    if not parsed.username:
+        return url
+    netloc = parsed.hostname or ""
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+# ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
 

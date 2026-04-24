@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from .configure import configure
+from .configure import configure, detect_index_url
 from .scaffold import scaffold
 from .verify import verify
 
@@ -22,7 +22,12 @@ def main() -> None:
     )
     p_configure.add_argument(
         "index_url",
-        help="Internal feed URL",
+        nargs="?",
+        default=None,
+        help=(
+            "Internal feed URL. If omitted, auto-detected from"
+            " pyproject.toml ([tool.uv.index] or [tool.poetry.source])."
+        ),
     )
     p_configure.add_argument(
         "--user",
@@ -76,9 +81,18 @@ def main() -> None:
     args = parser.parse_args(argv)
 
     if args.command == "configure":
-        configure(args.index_url, user_scope=args.user, ci=args.ci)
+        index_url = args.index_url
+        if index_url is None:
+            index_url = detect_index_url()
+            if index_url is None:
+                parser.error(
+                    "INDEX_URL is required (no pyproject.toml with a configured"
+                    " feed was found in the current directory)"
+                )
+            print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
+        configure(index_url, user_scope=args.user, ci=args.ci)
         if args.verify:
-            verify(args.index_url)
+            verify(index_url)
     elif args.command == "verify":
         verify(args.index_url)
     elif args.command == "scaffold":
