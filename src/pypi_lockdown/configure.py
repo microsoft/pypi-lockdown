@@ -312,7 +312,7 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
     _write_uv_config(_uv_config_user(), index_url)
 
     # --- bootstrap keyring into target env ---
-    if env:
+    if env and not user_scope:
         from .standalone import bootstrap_keyring  # noqa: PLC0415
 
         print()

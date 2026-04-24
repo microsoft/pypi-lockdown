@@ -936,7 +936,7 @@ class TestPipxEndToEnd:
             env=env,
         )
 
-    def test_pipx_bootstrap_into_venv(self, tmp_path: Path) -> None:
+    def test_pipx_bootstrap_into_venv(self, tmp_path: Path) -> None:  # noqa: PLR0915
         import venv  # noqa: PLC0415
 
         # --- 1. Create an isolated pipx home ---
@@ -977,9 +977,15 @@ class TestPipxEndToEnd:
         venv.create(str(user_venv), with_pip=False)
 
         # --- 4. Run pypi-lockdown configure with VIRTUAL_ENV ---
+        # Isolate HOME/XDG_CONFIG_HOME so we don't touch the real uv.toml
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
         configure_env = {
             **env,
             "VIRTUAL_ENV": str(user_venv),
+            "HOME": str(fake_home),
+            "XDG_CONFIG_HOME": str(fake_home / ".config"),
+            **({"USERPROFILE": str(fake_home)} if sys.platform == "win32" else {}),
         }
         feed_url = (
             "https://pkgs.dev.azure.com/pypi-lockdown"

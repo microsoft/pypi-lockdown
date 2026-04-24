@@ -84,7 +84,12 @@ def _target_site_packages(env_path: Path) -> Path | None:
     if platform.system() == "Windows":
         sp = env_path / "Lib" / "site-packages"
     else:
-        candidates = sorted((env_path / "lib").glob("python*/site-packages"))
+        candidates = sorted(
+            (env_path / "lib").glob("python*/site-packages"),
+            key=lambda p: tuple(
+                int(x) for x in p.parts[-2].removeprefix("python").split(".")
+            ),
+        )
         major, minor = sys.version_info.major, sys.version_info.minor
         sp = (
             candidates[-1]
@@ -129,8 +134,9 @@ def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
 
     Starts from ``_BOOTSTRAP_ROOTS`` and recursively adds their
     ``Requires-Dist`` dependencies (non-extra only).  Only includes
-    packages that are actually installed in *site_packages* and are
-    pure-Python (``py3-none-any`` wheel tag).
+    packages that are actually installed in *site_packages* and pass
+    ``_is_pure_python()``, which allows pure-Python
+    ``py3-none-any`` distributions and compatible ``abi3`` wheels.
     """
     installed = _installed_packages(site_packages)
     allowlist: set[str] = set()

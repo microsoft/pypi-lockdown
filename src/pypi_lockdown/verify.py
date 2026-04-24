@@ -34,7 +34,7 @@ def verify(index_url: str) -> None:
         print("  FAIL Verification timed out after 60 seconds.")
         raise SystemExit(1) from None
     except FileNotFoundError:
-        print("  FAIL pip not found -- cannot verify.")
+        print("  FAIL Python executable not found -- cannot verify.")
         raise SystemExit(1) from None
 
     if result.returncode == 0:
