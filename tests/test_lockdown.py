@@ -27,6 +27,7 @@ from pypi_lockdown.configure import (
 from pypi_lockdown.standalone import (
     _installed_packages,
     _is_pure_python,
+    _normalise_name,
     _process_site_packages,
     _resolve_bootstrap_allowlist,
     _runtime_deps,
@@ -730,7 +731,7 @@ class TestResolveBootstrapAllowlist:
         *,
         tag: str = "py3-none-any",
     ) -> None:
-        norm = name.lower().replace("-", "_")
+        norm = _normalise_name(name)
         di = site_packages / f"{norm}-{version}.dist-info"
         di.mkdir(parents=True)
         meta = f"Name: {name}\nVersion: {version}\n"
@@ -738,9 +739,23 @@ class TestResolveBootstrapAllowlist:
             meta += f"Requires-Dist: {d}\n"
         (di / "METADATA").write_text(meta)
         (di / "WHEEL").write_text(f"Wheel-Version: 1.0\nTag: {tag}\n")
-        pkg_dir = site_packages / norm
-        pkg_dir.mkdir(exist_ok=True)
-        (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
+
+        # Handle namespace packages (e.g. jaraco.classes → jaraco/classes/)
+        import_parts = [p.replace("-", "_") for p in name.split(".")]
+        if len(import_parts) == 1:
+            pkg_dir = site_packages / import_parts[0]
+            pkg_dir.mkdir(exist_ok=True)
+            (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
+            (di / "top_level.txt").write_text(f"{import_parts[0]}\n")
+        else:
+            ns_dir = site_packages
+            for part in import_parts[:-1]:
+                ns_dir = ns_dir / part
+                ns_dir.mkdir(exist_ok=True)
+            leaf = ns_dir / import_parts[-1]
+            leaf.mkdir(exist_ok=True)
+            (leaf / "__init__.py").write_text(f"__version__ = '{version}'\n")
+            (di / "top_level.txt").write_text(f"{import_parts[0]}\n")
 
     def test_resolves_transitive_deps(self, tmp_path: Path) -> None:
         self._make_pkg(tmp_path, "keyring", "25.6.0", ["jaraco.classes"])
@@ -756,7 +771,7 @@ class TestResolveBootstrapAllowlist:
         allowed = _resolve_bootstrap_allowlist(tmp_path)
         assert "keyring" in allowed
         assert "artifacts_keyring_nofuss" in allowed
-        assert "jaraco.classes" in allowed or "jaraco_classes" in allowed
+        assert "jaraco_classes" in allowed
         assert "requests" in allowed
 
     def test_excludes_pypi_lockdown(self, tmp_path: Path) -> None:

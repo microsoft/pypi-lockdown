@@ -314,8 +314,7 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
         from .standalone import bootstrap_keyring  # noqa: PLC0415
 
         print()
-        if not bootstrap_keyring(env):
-            pass  # nothing to install — already present or no source found
+        bootstrap_keyring(env)
 
     # --- project-level pyproject.toml (uv + poetry) ---
     if not ci:

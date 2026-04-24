@@ -4,7 +4,8 @@ Supports two source modes:
 - **shiv zipapp**: copy from the shiv-extracted site-packages (original path)
 - **installed** (pipx / uv tool): copy from the current process's site-packages
 
-Only pure-Python (``py3-none-any``) packages are copied to avoid ABI issues
+Only broadly compatible packages are copied: pure-Python
+(``py3-none-any``) distributions and ``abi3`` wheels, to reduce ABI issues
 when the source and target Python versions differ.
 """
 
@@ -115,12 +116,11 @@ def _process_site_packages() -> Path | None:
             dist = md.distribution(probe)
         except md.PackageNotFoundError:
             continue
-        # dist._path is the .dist-info directory (pathlib.Path)
-        dist_info = getattr(dist, "_path", None)
-        if dist_info is not None:
-            sp = Path(dist_info.parent)
-            if sp.is_dir():
-                return sp
+        # Use public locate_file API to resolve site-packages root.
+        # locate_file("") returns the base directory containing the dist-info.
+        sp = Path(str(dist.locate_file(""))).resolve()
+        if sp.is_dir():
+            return sp
     return None
 
 
@@ -138,7 +138,7 @@ def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
 
     while queue:
         raw_name = queue.pop()
-        name = raw_name.lower().replace("-", "_")
+        name = _normalise_name(raw_name)
         if name in allowlist or name not in installed:
             continue
         # Check purelib — skip C extensions
@@ -149,7 +149,7 @@ def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
         queue.extend(_runtime_deps(site_packages, name))
 
     # Remove packages we never want to copy
-    allowlist -= {p.replace("-", "_") for p in _SKIP_PREFIXES}
+    allowlist -= {_normalise_name(p) for p in _SKIP_PREFIXES}
     return allowlist
 
 
@@ -198,6 +198,10 @@ def _runtime_deps(site_packages: Path, normalised_name: str) -> list[str]:
                 # Skip extras: "foo ; extra == ..."
                 if "extra ==" in spec or "extra==" in spec:
                     continue
+                # Include deps with environment markers unconditionally —
+                # they may be needed on the target platform, and excluding
+                # them risks missing packages.  The allowlist already
+                # filters to actually-installed packages.
                 deps.append(_bare_pkg_name(spec))
             return deps
     return []
@@ -219,13 +223,18 @@ def _should_skip(name: str) -> bool:
     return pkg in _SKIP_PREFIXES
 
 
+def _normalise_name(name: str) -> str:
+    """PEP 503 / PEP 625 name normalization."""
+    return name.lower().replace("-", "_").replace(".", "_")
+
+
 def _parse_dist_info(name: str) -> tuple[str, str] | None:
     """Extract ``(normalised_name, version)`` from a ``.dist-info`` dir name."""
     base = name.removesuffix(".dist-info")
     parts = base.split("-", 1)
     if len(parts) != 2:  # name-version
         return None
-    return parts[0].lower().replace("-", "_"), parts[1]
+    return _normalise_name(parts[0]), parts[1]
 
 
 def _installed_packages(site_packages: Path) -> dict[str, str]:
@@ -275,15 +284,15 @@ def _report_bootstrap(
     if copied:
         print("  Installed bundled packages:")
         for pkg in copied:
-            print(f"    ✓ {pkg}")
+            print(f"    + {pkg}")
     if skipped_same:
         print("  Already installed (same version):")
         for pkg in skipped_same:
-            print(f"    · {pkg}")
+            print(f"    - {pkg}")
     if skipped_conflict:
-        print("  ⚠ Skipped (different version already installed):")
+        print("  WARNING: Skipped (different version already installed):")
         for name, inst, bund in skipped_conflict:
-            print(f"    · {name}: installed {inst}, bundled {bund}")
+            print(f"    - {name}: installed {inst}, bundled {bund}")
 
 
 def _find_source() -> tuple[Path | None, bool]:
@@ -422,7 +431,7 @@ def bootstrap_keyring(env_path: Path) -> bool:
 
     dst = _target_site_packages(env_path)
     if dst is None:
-        print(f"  ⚠ Target site-packages not found for: {env_path}")
+        print(f"  WARNING: Target site-packages not found for: {env_path}")
         return False
 
     # Same env — packages are already available
