@@ -18,6 +18,7 @@ from pypi_lockdown.configure import (
     _ensure_userinfo,
     _strip_userinfo,
     _write_pip_config,
+    _write_pyproject_hatch,
     _write_pyproject_poetry,
     _write_pyproject_uv,
     _write_uv_config,
@@ -409,6 +410,60 @@ class TestPyprojectPoetry:
         assert sources[1]["priority"] == "explicit"
 
 
+class TestPyprojectHatch:
+    def test_writes_env_vars_when_hatch_exists(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[project]\nname = 'mypkg'\n\n"
+            "[tool.hatch.envs.default]\n"
+            'installer = "uv"\n'
+        )
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        env_vars = doc["tool"]["hatch"]["envs"]["default"]["env-vars"]
+        assert env_vars["PIP_INDEX_URL"] == _FEED_URL
+        assert env_vars["UV_DEFAULT_INDEX"] == _TOKEN_FEED_URL
+        # Preserves existing content
+        assert doc["tool"]["hatch"]["envs"]["default"]["installer"] == "uv"
+
+    def test_skips_when_no_hatch_section(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        original = "[project]\nname = 'mypkg'\n"
+        path.write_text(original)
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        assert path.read_text() == original
+
+    def test_upserts_existing_env_vars(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[tool.hatch.envs.default.env-vars]\n"
+            'PIP_INDEX_URL = "https://old.example.com/simple/"\n'
+            'SOME_OTHER_VAR = "keep"\n'
+        )
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        env_vars = doc["tool"]["hatch"]["envs"]["default"]["env-vars"]
+        assert env_vars["PIP_INDEX_URL"] == _FEED_URL
+        assert env_vars["UV_DEFAULT_INDEX"] == _TOKEN_FEED_URL
+        assert env_vars["SOME_OTHER_VAR"] == "keep"
+
+    def test_creates_envs_default_if_missing(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text("[tool.hatch]\n")
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        env_vars = doc["tool"]["hatch"]["envs"]["default"]["env-vars"]
+        assert env_vars["PIP_INDEX_URL"] == _FEED_URL
+
+
 class TestConfigurePyprojectPrompt:
     def test_skips_when_no_pyproject(
         self,
@@ -649,6 +704,46 @@ class TestDetectIndexUrl:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'mypkg'\n")
         assert detect_index_url() is None
+
+    def test_detects_hatch_pip_index_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            f'[tool.hatch.envs.default.env-vars]\nPIP_INDEX_URL = "{_FEED_URL}"\n'
+        )
+        assert detect_index_url() == _FEED_URL
+
+    def test_detects_hatch_uv_default_index(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[tool.hatch.envs.default.env-vars]\n"
+            f'UV_DEFAULT_INDEX = "{_TOKEN_FEED_URL}"\n'
+        )
+        result = detect_index_url()
+        assert result == _FEED_URL
+
+    def test_uv_takes_precedence_over_hatch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[[tool.uv.index]]\n"
+            'url = "https://uv-feed.example.com/simple/"\n'
+            "default = true\n"
+            "\n"
+            "[tool.hatch.envs.default.env-vars]\n"
+            f'PIP_INDEX_URL = "{_FEED_URL}"\n'
+        )
+        assert detect_index_url() == "https://uv-feed.example.com/simple/"
 
 
 class TestStripUserinfo:

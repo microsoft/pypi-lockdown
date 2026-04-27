@@ -12,7 +12,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="pypi-lockdown",
         description=(
-            "Lock down pip, uv, and poetry to pull packages from an internal PyPI feed."
+            "Lock down pip, uv, poetry, and hatch to pull packages"
+            " from an internal PyPI feed."
         ),
     )
     sub = parser.add_subparsers(dest="command")
@@ -20,7 +21,7 @@ def main() -> None:
     # --- configure (default when no subcommand) ---
     p_configure = sub.add_parser(
         "configure",
-        help="Write pip/uv config files pointing at an internal feed",
+        help="Write pip/uv/hatch config files pointing at an internal feed",
     )
     p_configure.add_argument(
         "index_url",
@@ -28,7 +29,8 @@ def main() -> None:
         default=None,
         help=(
             "Internal feed URL. If omitted, auto-detected from"
-            " pyproject.toml ([[tool.uv.index]] or [[tool.poetry.source]])."
+            " pyproject.toml ([[tool.uv.index]], [[tool.poetry.source]],"
+            " or [tool.hatch.envs.default.env-vars])."
         ),
     )
     p_configure.add_argument(
@@ -90,7 +92,8 @@ def main() -> None:
                 parser.error(
                     "INDEX_URL is required (auto-detection from pyproject.toml"
                     " failed; pass INDEX_URL explicitly or configure"
-                    " [[tool.uv.index]] / [[tool.poetry.source]])"
+                    " [[tool.uv.index]], [[tool.poetry.source]],"
+                    " or [tool.hatch.envs.default.env-vars])"
                 )
             print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
         configure(
