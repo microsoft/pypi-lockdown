@@ -18,7 +18,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "{name}"
 dynamic = ["version"]
-description = "Lock down pip/uv/poetry to use the {name} internal feed"
+description = "Lock down pip/uv/poetry/hatch to use the {name} internal feed"
 requires-python = ">=3.9"
 license = "MIT"
 dependencies = [
@@ -48,7 +48,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="{name}",
-        description="Lock down pip/uv/poetry to use the {name} internal feed.",
+        description="Lock down pip/uv/poetry/hatch to use the {name} internal feed.",
     )
     parser.add_argument(
         "--user",

@@ -61,11 +61,13 @@ index:
 | **uv**     | user                 | `~/.config/uv/uv.toml` (platform-aware)        |
 | **uv**     | project (prompted)   | `./pyproject.toml` `[tool.uv]` section          |
 | **Poetry** | project (prompted)   | `./pyproject.toml` `[[tool.poetry.source]]`     |
+| **Hatch**  | project (if `[tool.hatch]` exists) | `./pyproject.toml` `[tool.hatch.envs.default.env-vars]` |
 
 When run inside a project directory (containing `pyproject.toml`), the tool
-offers to configure uv and Poetry settings directly in the project file —
-including `keyring-provider` and index URLs with the `__token__@` prefix that
-uv requires for keyring authentication.
+offers to configure uv, Poetry, and Hatch settings directly in the project
+file — including `keyring-provider` and index URLs with the `__token__@` prefix
+that uv requires for keyring authentication. Hatch configuration is only written
+when an existing `[tool.hatch]` section is detected.
 
 Works with **venv**, **conda**, and any other environment manager that sets
 `VIRTUAL_ENV` or `CONDA_PREFIX`.
@@ -97,7 +99,7 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 
 | Command      | Effect |
 |--------------|--------|
-| `configure`  | Write pip/uv config files (default when omitted). |
+| `configure`  | Write pip and uv config files, and optionally update project `pyproject.toml` for Poetry/Hatch (default when omitted). |
 | `verify`     | Test that the configured feed is reachable and authentication works. |
 | `scaffold`   | Generate a wrapper package that hardcodes a private feed URL. |
 
@@ -115,6 +117,7 @@ When `INDEX_URL` is omitted, `pypi-lockdown` reads the current directory's
 
 1. `[[tool.uv.index]]` entry with `default = true`
 2. `[[tool.poetry.source]]` entry with `priority = "primary"`
+3. `[tool.hatch.envs.default.env-vars]` for `PIP_INDEX_URL` or `UV_DEFAULT_INDEX`
 
 This means after initial setup, team members can simply run:
 
@@ -183,7 +186,7 @@ tox -e standalone -- linux-x86_64    # or macos-universal2, win-amd64
 - **Standalone `.pyz` integrity**: When building `.pyz` locally for air-gapped
   use, the build includes zip-slip protection that validates no archive entry
   escapes the staging directory.
-- **Narrow config scope**: `pypi-lockdown` only writes `index-url` to pip/uv config
+- **Narrow config scope**: `pypi-lockdown` only writes `index-url` to pip/uv/hatch config
   files. It does not modify global Python settings or install hooks.
 
 ## License

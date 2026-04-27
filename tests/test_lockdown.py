@@ -18,6 +18,7 @@ from pypi_lockdown.configure import (
     _ensure_userinfo,
     _strip_userinfo,
     _write_pip_config,
+    _write_pyproject_hatch,
     _write_pyproject_poetry,
     _write_pyproject_uv,
     _write_uv_config,
@@ -409,6 +410,60 @@ class TestPyprojectPoetry:
         assert sources[1]["priority"] == "explicit"
 
 
+class TestPyprojectHatch:
+    def test_writes_env_vars_when_hatch_exists(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[project]\nname = 'mypkg'\n\n"
+            "[tool.hatch.envs.default]\n"
+            'installer = "uv"\n'
+        )
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        env_vars = doc["tool"]["hatch"]["envs"]["default"]["env-vars"]
+        assert env_vars["PIP_INDEX_URL"] == _FEED_URL
+        assert env_vars["UV_DEFAULT_INDEX"] == _TOKEN_FEED_URL
+        # Preserves existing content
+        assert doc["tool"]["hatch"]["envs"]["default"]["installer"] == "uv"
+
+    def test_skips_when_no_hatch_section(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        original = "[project]\nname = 'mypkg'\n"
+        path.write_text(original)
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        assert path.read_text() == original
+
+    def test_upserts_existing_env_vars(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text(
+            "[tool.hatch.envs.default.env-vars]\n"
+            'PIP_INDEX_URL = "https://old.example.com/simple/"\n'
+            'SOME_OTHER_VAR = "keep"\n'
+        )
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        env_vars = doc["tool"]["hatch"]["envs"]["default"]["env-vars"]
+        assert env_vars["PIP_INDEX_URL"] == _FEED_URL
+        assert env_vars["UV_DEFAULT_INDEX"] == _TOKEN_FEED_URL
+        assert env_vars["SOME_OTHER_VAR"] == "keep"
+
+    def test_creates_envs_default_if_missing(self, tmp_path: Path) -> None:
+        path = tmp_path / "pyproject.toml"
+        path.write_text("[tool.hatch]\n")
+
+        _write_pyproject_hatch(path, _FEED_URL)
+
+        doc = tomlkit.parse(path.read_text())
+        env_vars = doc["tool"]["hatch"]["envs"]["default"]["env-vars"]
+        assert env_vars["PIP_INDEX_URL"] == _FEED_URL
+
+
 class TestConfigurePyprojectPrompt:
     def test_skips_when_no_pyproject(
         self,
@@ -650,6 +705,58 @@ class TestDetectIndexUrl:
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'mypkg'\n")
         assert detect_index_url() is None
 
+    def test_detects_hatch_pip_index_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            f'[tool.hatch.envs.default.env-vars]\nPIP_INDEX_URL = "{_FEED_URL}"\n'
+        )
+        assert detect_index_url() == _FEED_URL
+
+    def test_detects_hatch_uv_default_index(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[tool.hatch.envs.default.env-vars]\n"
+            f'UV_DEFAULT_INDEX = "{_TOKEN_FEED_URL}"\n'
+        )
+        result = detect_index_url()
+        assert result == _FEED_URL
+
+    def test_detects_hatch_legacy_uv_index_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            f'[tool.hatch.envs.default.env-vars]\nUV_INDEX_URL = "{_TOKEN_FEED_URL}"\n'
+        )
+        result = detect_index_url()
+        assert result == _FEED_URL
+
+    def test_uv_takes_precedence_over_hatch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            "[[tool.uv.index]]\n"
+            'url = "https://uv-feed.example.com/simple/"\n'
+            "default = true\n"
+            "\n"
+            "[tool.hatch.envs.default.env-vars]\n"
+            f'PIP_INDEX_URL = "{_FEED_URL}"\n'
+        )
+        assert detect_index_url() == "https://uv-feed.example.com/simple/"
+
 
 class TestStripUserinfo:
     def test_strips_token(self) -> None:
@@ -805,6 +912,24 @@ class TestResolveBootstrapAllowlist:
         allowed = _resolve_bootstrap_allowlist(tmp_path)
         assert "cryptography" not in allowed
 
+    def test_includes_c_extensions_when_native_ok(self, tmp_path: Path) -> None:
+        self._make_pkg(
+            tmp_path,
+            "artifacts-keyring-nofuss",
+            "0.8.0",
+            ["cryptography>=2.5"],
+        )
+        self._make_pkg(tmp_path, "keyring", "25.6.0")
+        self._make_pkg(
+            tmp_path,
+            "cryptography",
+            "43.0.0",
+            tag="cp312-cp312-manylinux_2_34_x86_64",
+        )
+
+        allowed = _resolve_bootstrap_allowlist(tmp_path, native_ok=True)
+        assert "cryptography" in allowed
+
 
 class TestBootstrapFromProcess:
     """Test bootstrap_keyring in process (non-shiv) mode."""
@@ -877,6 +1002,55 @@ class TestBootstrapFromProcess:
         assert "Installed" in out
         assert (dst / "keyring" / "__init__.py").exists()
         assert (dst / "artifacts_keyring_nofuss" / "__init__.py").exists()
+
+    def test_copies_c_extension_so_files(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """C extension .so files listed by stem in top_level.txt are copied."""
+        src = self._make_site_packages(
+            tmp_path / "src",
+            {"keyring": "25.6.0", "artifacts_keyring_nofuss": "0.8.0"},
+        )
+        # Add cffi with a platform-specific .so file
+        cffi_di = src / "cffi-2.0.0.dist-info"
+        cffi_di.mkdir()
+        (cffi_di / "METADATA").write_text("Name: cffi\nVersion: 2.0.0\n")
+        (cffi_di / "WHEEL").write_text(
+            "Wheel-Version: 1.0\nTag: cp312-cp312-manylinux_2_34_x86_64\n"
+        )
+        (cffi_di / "top_level.txt").write_text("_cffi_backend\ncffi\n")
+        # Create the .so file and cffi package dir
+        so_name = "_cffi_backend.cpython-312-x86_64-linux-gnu.so"
+        (src / so_name).write_bytes(b"\x7fELF")
+        cffi_pkg = src / "cffi"
+        cffi_pkg.mkdir()
+        (cffi_pkg / "__init__.py").write_text("__version__ = '2.0.0'\n")
+        # Wire up dependency: nofuss -> cffi
+        di = src / "artifacts_keyring_nofuss-0.8.0.dist-info"
+        (di / "METADATA").write_text(
+            "Name: artifacts-keyring-nofuss\nVersion: 0.8.0\n"
+            "Requires-Dist: keyring>=23.0\n"
+            "Requires-Dist: cffi>=1.0\n"
+        )
+        dst = self._make_site_packages(tmp_path / "dst", {})
+
+        monkeypatch.setattr(self._SHIV, lambda: None)
+        monkeypatch.setattr(self._PROC, lambda: src)
+        monkeypatch.setattr(self._TGT, lambda _p: dst)
+        # native_ok=True via matching version
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._target_python_version",
+            lambda _p: (sys.version_info.major, sys.version_info.minor),
+        )
+
+        result = bootstrap_keyring(tmp_path / "env")
+        assert result is True
+        assert (dst / so_name).exists(), (
+            f".so file not copied; dst contents: {[p.name for p in dst.iterdir()]}"
+        )
+        assert (dst / "cffi" / "__init__.py").exists()
 
 
 # ---------------------------------------------------------------------------

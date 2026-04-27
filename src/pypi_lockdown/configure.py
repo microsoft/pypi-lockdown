@@ -17,11 +17,64 @@ _MARKER = (
 # ---------------------------------------------------------------------------
 
 
+def _detect_from_hatch(hatch: object) -> str | None:
+    """Extract feed URL from hatch env-vars config."""
+    if not isinstance(hatch, dict):
+        return None
+    hatch_envs = hatch.get("envs", {})
+    if not isinstance(hatch_envs, dict):
+        return None
+    hatch_default = hatch_envs.get("default", {})
+    if not isinstance(hatch_default, dict):
+        return None
+    hatch_env_vars = hatch_default.get("env-vars", {})
+    if not isinstance(hatch_env_vars, dict):
+        return None
+    for key in ("PIP_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX_URL"):
+        url = hatch_env_vars.get(key)
+        if url:
+            return _strip_userinfo(str(url))
+    return None
+
+
+def _detect_from_tool(tool: dict[str, object]) -> str | None:
+    """Search tool tables for a feed URL (uv → poetry → hatch)."""
+    from typing import Any  # noqa: PLC0415
+
+    _tool: dict[str, Any] = tool
+
+    # Try uv indexes first
+    uv = _tool.get("uv", {})
+    if isinstance(uv, dict):
+        for idx in uv.get("index", []):
+            if isinstance(idx, dict) and idx.get("default"):
+                url = idx.get("url")
+                if url:
+                    return _strip_userinfo(str(url))
+
+    # Fall back to poetry sources
+    poetry = _tool.get("poetry", {})
+    if isinstance(poetry, dict):
+        for src in poetry.get("source", []):
+            if isinstance(src, dict) and src.get("priority") == "primary":
+                url = src.get("url")
+                if url:
+                    return _strip_userinfo(str(url))
+
+    # Fall back to hatch default env-vars
+    return _detect_from_hatch(_tool.get("hatch"))
+
+    return None
+
+
 def detect_index_url() -> str | None:
     """Try to read the default index URL from ``pyproject.toml`` in the cwd.
 
     Checks ``[[tool.uv.index]]`` entries for one marked ``default = true``,
-    then falls back to ``[[tool.poetry.source]]`` with ``priority = "primary"``.
+    then falls back to ``[[tool.poetry.source]]`` with
+    ``priority = "primary"``, then to
+    ``[tool.hatch.envs.default.env-vars]`` for ``PIP_INDEX_URL`` or
+    ``UV_DEFAULT_INDEX``.
     Returns the URL with any ``__token__@`` userinfo stripped, or *None* if
     no feed URL could be found.
     """
@@ -39,23 +92,7 @@ def detect_index_url() -> str | None:
     if not isinstance(tool, dict):
         return None
 
-    # Try uv indexes first
-    uv = tool.get("uv", {})
-    for idx in uv.get("index", []):
-        if idx.get("default"):
-            url = idx.get("url")
-            if url:
-                return _strip_userinfo(str(url))
-
-    # Fall back to poetry sources
-    poetry = tool.get("poetry", {})
-    for src in poetry.get("source", []):
-        if src.get("priority") == "primary":
-            url = src.get("url")
-            if url:
-                return _strip_userinfo(str(url))
-
-    return None
+    return _detect_from_tool(tool)
 
 
 def _strip_userinfo(url: str) -> str:
@@ -251,6 +288,34 @@ def _write_pyproject_poetry(path: Path, index_url: str) -> None:
     print(f"  OK {path} ([[tool.poetry.source]])")
 
 
+def _write_pyproject_hatch(path: Path, index_url: str) -> None:
+    """Upsert ``[tool.hatch.envs.default.env-vars]`` in an existing ``pyproject.toml``.
+
+    Only writes if a ``[tool.hatch]`` section already exists, to avoid adding
+    Hatch configuration to non-Hatch projects.  Sets both ``PIP_INDEX_URL``
+    (for pip-backed envs) and ``UV_DEFAULT_INDEX`` (for uv-backed envs).
+    """
+    import tomlkit  # noqa: PLC0415
+
+    doc = tomlkit.parse(path.read_text())
+
+    tool = doc.get("tool", {})
+    if "hatch" not in tool:
+        return
+
+    hatch = tool["hatch"]
+    envs = hatch.setdefault("envs", {})
+    default = envs.setdefault("default", {})
+    env_vars = default.setdefault("env-vars", {})
+
+    uv_url = _ensure_userinfo(index_url)
+    env_vars["PIP_INDEX_URL"] = index_url
+    env_vars["UV_DEFAULT_INDEX"] = uv_url
+
+    path.write_text(tomlkit.dumps(doc))
+    print(f"  OK {path} ([tool.hatch.envs.default.env-vars])")
+
+
 def _prompt_yes_no(prompt: str) -> bool:
     """Prompt the user for yes/no confirmation. Returns True for yes."""
     import sys  # noqa: PLC0415
@@ -272,12 +337,13 @@ def _configure_pyproject(index_url: str) -> None:
         return
 
     print(f"\n  Found {pyproject}")
-    if not _prompt_yes_no("Write uv/poetry config to pyproject.toml?"):
+    if not _prompt_yes_no("Write uv/poetry/hatch config to pyproject.toml?"):
         return
 
     print()
     _write_pyproject_uv(pyproject, index_url)
     _write_pyproject_poetry(pyproject, index_url)
+    _write_pyproject_hatch(pyproject, index_url)
 
 
 # ---------------------------------------------------------------------------
