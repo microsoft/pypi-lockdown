@@ -1,4 +1,4 @@
-Configuring Python package managers to install from an Azure DevOps Artifacts feed using [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss) and [`pypi-lockdown`](https://github.com/microsoft/pypi-lockdown) — pure-Python, no .NET, no interactive prompts.
+Configuring Python package managers to install from an Azure DevOps Artifacts feed using [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss) and [`pypi-lockdown`](https://github.com/microsoft/pypi-lockdown) — pure-Python, no .NET, and automation-friendly (`pypi-lockdown` only prompts in interactive shells; `--ci` or non-TTY execution disables prompts).
 
 Set `$PRIVATE_FEED` to your team's feed URL, e.g.:
 
@@ -18,7 +18,7 @@ keyring-provider = "subprocess"
 
 [[tool.uv.index]]
 name = "ado-feed"
-url = "https://VssSessionToken@$PRIVATE_FEED"
+url = "https://__token__@pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/"
 authenticate = "always"
 default = true
 ```
@@ -31,7 +31,7 @@ pip install pypi-lockdown \
 python -m pypi_lockdown "$PRIVATE_FEED"
 ```
 
-This writes the `[tool.uv]` + `[[tool.uv.index]]` config into `pyproject.toml`, installs `keyring` + `artifacts-keyring-nofuss`, and configures pip — all in one step.
+This installs `keyring` + `artifacts-keyring-nofuss` and configures pip/uv in one step.  In an interactive shell with a `pyproject.toml` present, it will also offer to add the `[tool.uv]` + `[[tool.uv.index]]` config shown above directly to `pyproject.toml`; otherwise it writes user-level `uv.toml` and pip config.  Pass `--ci` to disable prompts.
 
 ### Alternative: manual setup
 
@@ -97,9 +97,15 @@ if((Get-FileHash $f SHA256).Hash-ne$h){rm $f;throw "Hash mismatch!"}
 
 ```bash
 V="0.10.12"; H="2dbc8204431a43a30f5396f3bb94d3f4505a2aabd4d35a9f75d5d9d6cfa81528"; F=$(mktemp)
+trap 'rm -f "$F"' EXIT
 curl -fsSL "https://astral.sh/uv/$V/install.sh" -o "$F"
-echo "$H  $F" | sha256sum -c - && sh "$F" || echo "Hash mismatch!"
-rm "$F"
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL=$(sha256sum "$F" | awk '{print $1}')
+else
+  ACTUAL=$(shasum -a 256 "$F" | awk '{print $1}')
+fi
+if [ "$ACTUAL" != "$H" ]; then echo "Hash mismatch!" >&2; exit 1; fi
+sh "$F"
 ```
 
 # How authentication works
@@ -152,6 +158,7 @@ steps:
       pip install -r requirements.txt
     env:
       ARTIFACTS_KEYRING_NOFUSS_TOKEN: $(System.AccessToken)
+      PRIVATE_FEED: https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
 ```
 
 ## GitHub Actions — OIDC (Workload Identity Federation)
@@ -174,7 +181,7 @@ steps:
       UV_KEYRING_PROVIDER: subprocess
 ```
 
-See also: [C(i): GitHub OIDC setup](/Getting-started/Securing-uv/C\(i\):-GitHub) for configuring the App Registration and federated credentials.
+See also: [GitHub OIDC setup](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust?pivots=identity-wif-apps-methods-azp#github-actions) for configuring the App Registration and federated credentials.
 
 ## GitHub Actions — self-hosted runner with Managed Identity
 
@@ -193,7 +200,7 @@ steps:
 
 GIM policy prefers self-hosted runners over GitHub-hosted runners ([source](https://eng.ms/docs/more/github-inside-microsoft/policies/actions)).
 
-See also: [C(ii): GitHub self-hosted runner](/Getting-started/Securing-uv/C\(ii\):-GitHub-self%2Dhosted-runner) for provisioning the runner and granting its managed identity access to the ADO feed.
+See also: [1ES hosted pool documentation](https://eng.ms/docs/cloud-ai-platform/devdiv/one-engineering-system-1es/1es-docs/1es-hosted-pools) for provisioning the runner and granting its managed identity access to the ADO feed.
 
 ## Docker build
 
