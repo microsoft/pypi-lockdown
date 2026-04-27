@@ -108,6 +108,27 @@ def _target_python(env_path: Path) -> Path | None:
     return p if p.is_file() else None
 
 
+def _target_python_version(env_path: Path) -> tuple[int, int] | None:
+    """Return ``(major, minor)`` of the target environment's Python."""
+    python = _target_python(env_path)
+    if python is None:
+        return None
+    try:
+        result = subprocess.run(
+            [str(python), "-c", "import sys; print(sys.version_info[:2])"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().strip("()").split(",")
+            return int(parts[0]), int(parts[1])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def _process_site_packages() -> Path | None:
     """Locate site-packages of the current running process.
 
@@ -129,14 +150,21 @@ def _process_site_packages() -> Path | None:
     return None
 
 
-def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
+def _resolve_bootstrap_allowlist(
+    site_packages: Path,
+    *,
+    native_ok: bool = False,
+) -> set[str]:
     """Build the set of normalised package names to bootstrap.
 
     Starts from ``_BOOTSTRAP_ROOTS`` and recursively adds their
     ``Requires-Dist`` dependencies (non-extra only).  Only includes
-    packages that are actually installed in *site_packages* and pass
-    ``_is_pure_python()``, which allows pure-Python
-    ``py3-none-any`` distributions and compatible ``abi3`` wheels.
+    packages that are actually installed in *site_packages*.
+
+    When *native_ok* is False (the default), only pure-Python
+    ``py3-none-any`` distributions and ``abi3`` wheels are included.
+    When True, C-extension packages are included too (safe when the
+    source and target Python share the same version and platform).
     """
     installed = _installed_packages(site_packages)
     allowlist: set[str] = set()
@@ -147,8 +175,8 @@ def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
         name = _normalise_name(raw_name)
         if name in allowlist or name not in installed:
             continue
-        # Check purelib -- skip C extensions
-        if not _is_pure_python(site_packages, name):
+        # Check purelib -- skip C extensions unless native_ok
+        if not native_ok and not _is_pure_python(site_packages, name):
             continue
         allowlist.add(name)
         # Enqueue runtime deps (skip extras, skip markers we can't evaluate)
@@ -325,6 +353,50 @@ def _collect_bundled(
     return bundled
 
 
+def _expand_extension_stems(src: Path, stems: set[str]) -> set[str]:
+    """Find files in *src* whose stem (before the first dot) matches *stems*.
+
+    C extensions have platform-specific suffixes
+    (e.g. ``_cffi_backend.cpython-312-x86_64-linux-gnu.so``)
+    that are not listed in ``top_level.txt``.
+    """
+    extra: set[str] = set()
+    for item in src.iterdir():
+        if item.is_file() and item.name.split(".", 1)[0] in stems:
+            extra.add(item.name)
+    return extra
+
+
+def _toplevel_from_dist(di: Path, src: Path) -> set[str]:
+    """Return top-level file/dir names owned by one distribution.
+
+    Reads ``top_level.txt`` first; falls back to ``RECORD``.
+    """
+    owned: set[str] = set()
+
+    top_level = di / "top_level.txt"
+    if top_level.exists():
+        stems: set[str] = set()
+        for line in top_level.read_text(encoding="utf-8").splitlines():
+            name = line.strip()
+            if name:
+                owned.add(name)
+                stems.add(name)
+        owned |= _expand_extension_stems(src, stems)
+        return owned
+
+    record = di / "RECORD"
+    if record.exists():
+        for line in record.read_text(encoding="utf-8").splitlines():
+            entry = line.split(",")[0]
+            if not entry or entry.startswith(di.name):
+                continue
+            top = entry.split("/")[0]
+            if top and top != "__pycache__":
+                owned.add(top)
+    return owned
+
+
 def _owned_toplevel_dirs(
     src: Path,
     allowed: set[str],
@@ -340,28 +412,8 @@ def _owned_toplevel_dirs(
         parsed = _parse_dist_info(di.name)
         if not parsed or parsed[0] not in allowed:
             continue
-        # Always include the dist-info dir itself
         owned.add(di.name)
-
-        # top_level.txt is the simplest source
-        top_level = di / "top_level.txt"
-        if top_level.exists():
-            for line in top_level.read_text(encoding="utf-8").splitlines():
-                name = line.strip()
-                if name:
-                    owned.add(name)
-            continue
-
-        # Fallback: parse RECORD for top-level entries
-        record = di / "RECORD"
-        if record.exists():
-            for line in record.read_text(encoding="utf-8").splitlines():
-                entry = line.split(",")[0]
-                if not entry or entry.startswith(di.name):
-                    continue
-                top = entry.split("/")[0]
-                if top and top != "__pycache__":
-                    owned.add(top)
+        owned |= _toplevel_from_dist(di, src)
     return owned
 
 
@@ -444,7 +496,15 @@ def bootstrap_keyring(env_path: Path) -> bool:
     if src.resolve() == dst.resolve():
         return False
 
-    allowed = _resolve_bootstrap_allowlist(src) if use_allowlist else None
+    allowed = (
+        _resolve_bootstrap_allowlist(
+            src,
+            native_ok=_target_python_version(env_path)
+            == (sys.version_info.major, sys.version_info.minor),
+        )
+        if use_allowlist
+        else None
+    )
     bundled = _collect_bundled(src, allowed)
     if not bundled:
         return False
