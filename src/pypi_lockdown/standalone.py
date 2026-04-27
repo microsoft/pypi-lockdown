@@ -353,6 +353,50 @@ def _collect_bundled(
     return bundled
 
 
+def _expand_extension_stems(src: Path, stems: set[str]) -> set[str]:
+    """Find files in *src* whose stem (before the first dot) matches *stems*.
+
+    C extensions have platform-specific suffixes
+    (e.g. ``_cffi_backend.cpython-312-x86_64-linux-gnu.so``)
+    that are not listed in ``top_level.txt``.
+    """
+    extra: set[str] = set()
+    for item in src.iterdir():
+        if item.is_file() and item.name.split(".", 1)[0] in stems:
+            extra.add(item.name)
+    return extra
+
+
+def _toplevel_from_dist(di: Path, src: Path) -> set[str]:
+    """Return top-level file/dir names owned by one distribution.
+
+    Reads ``top_level.txt`` first; falls back to ``RECORD``.
+    """
+    owned: set[str] = set()
+
+    top_level = di / "top_level.txt"
+    if top_level.exists():
+        stems: set[str] = set()
+        for line in top_level.read_text(encoding="utf-8").splitlines():
+            name = line.strip()
+            if name:
+                owned.add(name)
+                stems.add(name)
+        owned |= _expand_extension_stems(src, stems)
+        return owned
+
+    record = di / "RECORD"
+    if record.exists():
+        for line in record.read_text(encoding="utf-8").splitlines():
+            entry = line.split(",")[0]
+            if not entry or entry.startswith(di.name):
+                continue
+            top = entry.split("/")[0]
+            if top and top != "__pycache__":
+                owned.add(top)
+    return owned
+
+
 def _owned_toplevel_dirs(
     src: Path,
     allowed: set[str],
@@ -368,28 +412,8 @@ def _owned_toplevel_dirs(
         parsed = _parse_dist_info(di.name)
         if not parsed or parsed[0] not in allowed:
             continue
-        # Always include the dist-info dir itself
         owned.add(di.name)
-
-        # top_level.txt is the simplest source
-        top_level = di / "top_level.txt"
-        if top_level.exists():
-            for line in top_level.read_text(encoding="utf-8").splitlines():
-                name = line.strip()
-                if name:
-                    owned.add(name)
-            continue
-
-        # Fallback: parse RECORD for top-level entries
-        record = di / "RECORD"
-        if record.exists():
-            for line in record.read_text(encoding="utf-8").splitlines():
-                entry = line.split(",")[0]
-                if not entry or entry.startswith(di.name):
-                    continue
-                top = entry.split("/")[0]
-                if top and top != "__pycache__":
-                    owned.add(top)
+        owned |= _toplevel_from_dist(di, src)
     return owned
 
 

@@ -1003,6 +1003,55 @@ class TestBootstrapFromProcess:
         assert (dst / "keyring" / "__init__.py").exists()
         assert (dst / "artifacts_keyring_nofuss" / "__init__.py").exists()
 
+    def test_copies_c_extension_so_files(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """C extension .so files listed by stem in top_level.txt are copied."""
+        src = self._make_site_packages(
+            tmp_path / "src",
+            {"keyring": "25.6.0", "artifacts_keyring_nofuss": "0.8.0"},
+        )
+        # Add cffi with a platform-specific .so file
+        cffi_di = src / "cffi-2.0.0.dist-info"
+        cffi_di.mkdir()
+        (cffi_di / "METADATA").write_text("Name: cffi\nVersion: 2.0.0\n")
+        (cffi_di / "WHEEL").write_text(
+            "Wheel-Version: 1.0\nTag: cp312-cp312-manylinux_2_34_x86_64\n"
+        )
+        (cffi_di / "top_level.txt").write_text("_cffi_backend\ncffi\n")
+        # Create the .so file and cffi package dir
+        so_name = "_cffi_backend.cpython-312-x86_64-linux-gnu.so"
+        (src / so_name).write_bytes(b"\x7fELF")
+        cffi_pkg = src / "cffi"
+        cffi_pkg.mkdir()
+        (cffi_pkg / "__init__.py").write_text("__version__ = '2.0.0'\n")
+        # Wire up dependency: nofuss -> cffi
+        di = src / "artifacts_keyring_nofuss-0.8.0.dist-info"
+        (di / "METADATA").write_text(
+            "Name: artifacts-keyring-nofuss\nVersion: 0.8.0\n"
+            "Requires-Dist: keyring>=23.0\n"
+            "Requires-Dist: cffi>=1.0\n"
+        )
+        dst = self._make_site_packages(tmp_path / "dst", {})
+
+        monkeypatch.setattr(self._SHIV, lambda: None)
+        monkeypatch.setattr(self._PROC, lambda: src)
+        monkeypatch.setattr(self._TGT, lambda _p: dst)
+        # native_ok=True via matching version
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone._target_python_version",
+            lambda _p: (sys.version_info.major, sys.version_info.minor),
+        )
+
+        result = bootstrap_keyring(tmp_path / "env")
+        assert result is True
+        assert (dst / so_name).exists(), (
+            f".so file not copied; dst contents: {[p.name for p in dst.iterdir()]}"
+        )
+        assert (dst / "cffi" / "__init__.py").exists()
+
 
 # ---------------------------------------------------------------------------
 # End-to-end: pipx install → configure → keyring in target venv
