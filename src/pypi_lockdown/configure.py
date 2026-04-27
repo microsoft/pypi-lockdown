@@ -42,7 +42,7 @@ def _detect_from_tool(tool: dict[str, object]) -> str | None:
     # Fall back to hatch default env-vars
     hatch = _tool.get("hatch", {})
     hatch_env_vars = hatch.get("envs", {}).get("default", {}).get("env-vars", {})
-    for key in ("PIP_INDEX_URL", "UV_DEFAULT_INDEX"):
+    for key in ("PIP_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX_URL"):
         url = hatch_env_vars.get(key)
         if url:
             return _strip_userinfo(str(url))

@@ -729,6 +729,18 @@ class TestDetectIndexUrl:
         result = detect_index_url()
         assert result == _FEED_URL
 
+    def test_detects_hatch_legacy_uv_index_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            f'[tool.hatch.envs.default.env-vars]\nUV_INDEX_URL = "{_TOKEN_FEED_URL}"\n'
+        )
+        result = detect_index_url()
+        assert result == _FEED_URL
+
     def test_uv_takes_precedence_over_hatch(
         self,
         tmp_path: Path,
