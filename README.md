@@ -10,6 +10,8 @@ internal, authenticated PyPI feed.  Install this package first, then every
 subsequent `pip install` / `uv add` will use the configured feed — with
 `artifacts-keyring` handling credentials transparently.
 
+📖 **[Full setup guide](docs/securing-python-packaging.md)** — covers uv, pip, conda, CI pipelines, Docker, GitHub Actions, and devcontainers.
+
 ## Quick start
 
 ```bash
