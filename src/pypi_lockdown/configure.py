@@ -17,6 +17,26 @@ _MARKER = (
 # ---------------------------------------------------------------------------
 
 
+def _detect_from_hatch(hatch: object) -> str | None:
+    """Extract feed URL from hatch env-vars config."""
+    if not isinstance(hatch, dict):
+        return None
+    hatch_envs = hatch.get("envs", {})
+    if not isinstance(hatch_envs, dict):
+        return None
+    hatch_default = hatch_envs.get("default", {})
+    if not isinstance(hatch_default, dict):
+        return None
+    hatch_env_vars = hatch_default.get("env-vars", {})
+    if not isinstance(hatch_env_vars, dict):
+        return None
+    for key in ("PIP_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX_URL"):
+        url = hatch_env_vars.get(key)
+        if url:
+            return _strip_userinfo(str(url))
+    return None
+
+
 def _detect_from_tool(tool: dict[str, object]) -> str | None:
     """Search tool tables for a feed URL (uv → poetry → hatch)."""
     from typing import Any  # noqa: PLC0415
@@ -25,27 +45,24 @@ def _detect_from_tool(tool: dict[str, object]) -> str | None:
 
     # Try uv indexes first
     uv = _tool.get("uv", {})
-    for idx in uv.get("index", []):
-        if idx.get("default"):
-            url = idx.get("url")
-            if url:
-                return _strip_userinfo(str(url))
+    if isinstance(uv, dict):
+        for idx in uv.get("index", []):
+            if isinstance(idx, dict) and idx.get("default"):
+                url = idx.get("url")
+                if url:
+                    return _strip_userinfo(str(url))
 
     # Fall back to poetry sources
     poetry = _tool.get("poetry", {})
-    for src in poetry.get("source", []):
-        if src.get("priority") == "primary":
-            url = src.get("url")
-            if url:
-                return _strip_userinfo(str(url))
+    if isinstance(poetry, dict):
+        for src in poetry.get("source", []):
+            if isinstance(src, dict) and src.get("priority") == "primary":
+                url = src.get("url")
+                if url:
+                    return _strip_userinfo(str(url))
 
     # Fall back to hatch default env-vars
-    hatch = _tool.get("hatch", {})
-    hatch_env_vars = hatch.get("envs", {}).get("default", {}).get("env-vars", {})
-    for key in ("PIP_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX_URL"):
-        url = hatch_env_vars.get(key)
-        if url:
-            return _strip_userinfo(str(url))
+    return _detect_from_hatch(_tool.get("hatch"))
 
     return None
 

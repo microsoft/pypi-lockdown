@@ -21,7 +21,8 @@ def main() -> None:
     # --- configure (default when no subcommand) ---
     p_configure = sub.add_parser(
         "configure",
-        help="Write pip/uv/hatch config files pointing at an internal feed",
+        help="Write pip/uv config and poetry/hatch project settings"
+        " for an internal feed",
     )
     p_configure.add_argument(
         "index_url",

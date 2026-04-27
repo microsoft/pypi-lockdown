@@ -108,6 +108,27 @@ def _target_python(env_path: Path) -> Path | None:
     return p if p.is_file() else None
 
 
+def _target_python_version(env_path: Path) -> tuple[int, int] | None:
+    """Return ``(major, minor)`` of the target environment's Python."""
+    python = _target_python(env_path)
+    if python is None:
+        return None
+    try:
+        result = subprocess.run(
+            [str(python), "-c", "import sys; print(sys.version_info[:2])"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().strip("()").split(",")
+            return int(parts[0]), int(parts[1])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def _process_site_packages() -> Path | None:
     """Locate site-packages of the current running process.
 
@@ -129,14 +150,21 @@ def _process_site_packages() -> Path | None:
     return None
 
 
-def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
+def _resolve_bootstrap_allowlist(
+    site_packages: Path,
+    *,
+    native_ok: bool = False,
+) -> set[str]:
     """Build the set of normalised package names to bootstrap.
 
     Starts from ``_BOOTSTRAP_ROOTS`` and recursively adds their
     ``Requires-Dist`` dependencies (non-extra only).  Only includes
-    packages that are actually installed in *site_packages* and pass
-    ``_is_pure_python()``, which allows pure-Python
-    ``py3-none-any`` distributions and compatible ``abi3`` wheels.
+    packages that are actually installed in *site_packages*.
+
+    When *native_ok* is False (the default), only pure-Python
+    ``py3-none-any`` distributions and ``abi3`` wheels are included.
+    When True, C-extension packages are included too (safe when the
+    source and target Python share the same version and platform).
     """
     installed = _installed_packages(site_packages)
     allowlist: set[str] = set()
@@ -147,8 +175,8 @@ def _resolve_bootstrap_allowlist(site_packages: Path) -> set[str]:
         name = _normalise_name(raw_name)
         if name in allowlist or name not in installed:
             continue
-        # Check purelib -- skip C extensions
-        if not _is_pure_python(site_packages, name):
+        # Check purelib -- skip C extensions unless native_ok
+        if not native_ok and not _is_pure_python(site_packages, name):
             continue
         allowlist.add(name)
         # Enqueue runtime deps (skip extras, skip markers we can't evaluate)
@@ -444,7 +472,15 @@ def bootstrap_keyring(env_path: Path) -> bool:
     if src.resolve() == dst.resolve():
         return False
 
-    allowed = _resolve_bootstrap_allowlist(src) if use_allowlist else None
+    allowed = (
+        _resolve_bootstrap_allowlist(
+            src,
+            native_ok=_target_python_version(env_path)
+            == (sys.version_info.major, sys.version_info.minor),
+        )
+        if use_allowlist
+        else None
+    )
     bundled = _collect_bundled(src, allowed)
     if not bundled:
         return False

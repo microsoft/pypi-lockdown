@@ -61,7 +61,7 @@ index:
 | **uv**     | user                 | `~/.config/uv/uv.toml` (platform-aware)        |
 | **uv**     | project (prompted)   | `./pyproject.toml` `[tool.uv]` section          |
 | **Poetry** | project (prompted)   | `./pyproject.toml` `[[tool.poetry.source]]`     |
-| **Hatch**  | project (prompted)   | `./pyproject.toml` `[tool.hatch.envs.default.env-vars]` |
+| **Hatch**  | project (if `[tool.hatch]` exists) | `./pyproject.toml` `[tool.hatch.envs.default.env-vars]` |
 
 When run inside a project directory (containing `pyproject.toml`), the tool
 offers to configure uv, Poetry, and Hatch settings directly in the project
@@ -99,7 +99,7 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 
 | Command      | Effect |
 |--------------|--------|
-| `configure`  | Write pip/uv/hatch config files (default when omitted). |
+| `configure`  | Write pip and uv config files, and optionally update project `pyproject.toml` for Poetry/Hatch (default when omitted). |
 | `verify`     | Test that the configured feed is reachable and authentication works. |
 | `scaffold`   | Generate a wrapper package that hardcodes a private feed URL. |
 

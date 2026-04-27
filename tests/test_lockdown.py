@@ -912,6 +912,24 @@ class TestResolveBootstrapAllowlist:
         allowed = _resolve_bootstrap_allowlist(tmp_path)
         assert "cryptography" not in allowed
 
+    def test_includes_c_extensions_when_native_ok(self, tmp_path: Path) -> None:
+        self._make_pkg(
+            tmp_path,
+            "artifacts-keyring-nofuss",
+            "0.8.0",
+            ["cryptography>=2.5"],
+        )
+        self._make_pkg(tmp_path, "keyring", "25.6.0")
+        self._make_pkg(
+            tmp_path,
+            "cryptography",
+            "43.0.0",
+            tag="cp312-cp312-manylinux_2_34_x86_64",
+        )
+
+        allowed = _resolve_bootstrap_allowlist(tmp_path, native_ok=True)
+        assert "cryptography" in allowed
+
 
 class TestBootstrapFromProcess:
     """Test bootstrap_keyring in process (non-shiv) mode."""
