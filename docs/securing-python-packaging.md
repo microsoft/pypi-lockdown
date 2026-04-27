@@ -1,5 +1,24 @@
 Configuring Python package managers to install from an Azure DevOps Artifacts feed using [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss) and [`pypi-lockdown`](https://github.com/microsoft/pypi-lockdown) — pure-Python, no .NET, and automation-friendly (`pypi-lockdown` only prompts in interactive shells; `--ci` or non-TTY execution disables prompts).
 
+## Contents
+
+- [Setup](#setup)
+  - [Option 1: uv (recommended)](#option-1-uv-recommended)
+  - [Option 2: pip / conda](#option-2-pip--conda)
+  - [Install uv (hash-verified)](#install-uv-hash-verified)
+- [How authentication works](#how-authentication-works)
+- [Scenarios](#scenarios)
+  - [Local development](#local-development-windows-macos-linux-wsl)
+  - [ADO pipeline (uv)](#ado-pipeline-uv)
+  - [ADO pipeline (pip)](#ado-pipeline-pip)
+  - [GitHub Actions — OIDC](#github-actions--oidc-workload-identity-federation)
+  - [GitHub Actions — self-hosted runner](#github-actions--self-hosted-runner-with-managed-identity)
+  - [Docker build](#docker-build)
+  - [VS Code devcontainer / Codespaces](#vs-code-devcontainer--github-codespaces)
+- [Debugging](#debugging)
+
+---
+
 Set `$PRIVATE_FEED` to your team's feed URL, e.g.:
 
 ```bash
