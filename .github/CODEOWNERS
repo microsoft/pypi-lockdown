@@ -1,3 +1,13 @@
-# Require maintainer review for publishing and packaging config
-.github/workflows/release.yml  @microsoft/ai4s-eng
-pyproject.toml                  @microsoft/ai4s-eng
+# Security-sensitive paths require review from the engineering team.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: require review for everything
+* @microsoft/ai4s-eng
+
+# Workflows and CI config (highest-risk supply chain surface)
+.github/ @microsoft/ai4s-eng
+pyproject.toml @microsoft/ai4s-eng
+.pre-commit-config.yaml @microsoft/ai4s-eng
+
+# Source code
+src/ @microsoft/ai4s-eng
