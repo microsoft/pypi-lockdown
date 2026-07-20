@@ -16,6 +16,7 @@ import tomlkit
 from pypi_lockdown._build_standalone import _extract_wheels
 from pypi_lockdown.configure import (
     _ensure_userinfo,
+    _pip_config_env,
     _strip_userinfo,
     _write_pip_config,
     _write_pyproject_hatch,
@@ -687,7 +688,7 @@ class TestConfigureScope:
 
         configure(_FEED_URL, env_scope=True, ci=True)
 
-        pip_conf = venv / "pip.conf"
+        pip_conf = _pip_config_env(venv)
         assert pip_conf.exists()
         cfg = configparser.ConfigParser()
         cfg.read(pip_conf)

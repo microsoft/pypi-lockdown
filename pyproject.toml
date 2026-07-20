@@ -48,6 +48,7 @@ official = ["artifacts-keyring>=0.3"]
 nofuss = ["artifacts-keyring-nofuss>=0.6.0"]
 build = ["shiv", "tox"]
 dev = [
+    "keyring>=24",
     "mypy>=1.10",
     "pre-commit>=4.0",
     "ruff>=0.7",
