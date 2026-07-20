@@ -7,8 +7,18 @@
 
 Bootstrap a Python environment so that **all** packages are pulled from an
 internal, authenticated PyPI feed.  Install this package first, then every
-subsequent `pip install` / `uv add` will use the configured feed — with
-`artifacts-keyring` handling credentials transparently.
+subsequent `pip install` / `uv add` will use the configured feed — with a
+`keyring` backend handling credentials transparently.
+
+> **Pick a keyring backend.** `pypi-lockdown` ships no backend by default.
+> Install an extra so the feed can authenticate:
+> - `pypi-lockdown[official]` — the upstream `artifacts-keyring` (requires .NET).
+> - `pypi-lockdown[nofuss]` — the pure-Python
+>   [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss)
+>   fork (no .NET, automation-friendly). Distributed on the bootstrap feed.
+>
+> A bare `pip install pypi-lockdown` writes config but installs no backend, so
+> the feed won't authenticate until you add one of the extras.
 
 📖 **[Full setup guide](docs/securing-python-packaging.md)** — covers uv, pip, conda, CI pipelines, Docker, GitHub Actions, and devcontainers.
 
@@ -20,16 +30,17 @@ python -m venv .venv && source .venv/bin/activate   # venv (Linux / macOS)
 python -m venv .venv && .venv\Scripts\activate       # venv (Windows)
 conda create -n myenv python && conda activate myenv # conda
 
-# 2. Install pypi-lockdown from the public feed
-pip install pypi-lockdown \
+# 2. Install pypi-lockdown (with a keyring backend) from the public feed
+pip install "pypi-lockdown[official]" \
     --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
+# ...or the pure-Python fork: pip install "pypi-lockdown[nofuss]"
 
 # 3. Lock down the environment to use the authenticated feed
 python -m pypi_lockdown \
     https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
 
 # 4. Done — all future installs use the authenticated feed
-pip install requests   # resolved from PRIVATE_FEED, authenticated via artifacts-keyring
+pip install requests   # resolved from PRIVATE_FEED, authenticated via the keyring backend
 ```
 
 ### Standalone `.pyz` (build locally)
@@ -44,7 +55,7 @@ python dist/pypi-lockdown-linux-x86_64.pyz \
     https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
 ```
 
-This writes pip/uv config files **and** installs `artifacts-keyring-nofuss`
+This writes pip/uv config files **and** installs the official `artifacts-keyring`
 plus all its dependencies into the active environment — no network access to
 any package feed required.
 

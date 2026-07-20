@@ -22,8 +22,9 @@ from pathlib import Path
 # Packages that belong to pypi-lockdown itself and should NOT be copied
 _SKIP_PREFIXES = frozenset({"pypi_lockdown", "pypi-lockdown", "shiv", "_shiv"})
 
-# Root packages to bootstrap -- their transitive deps are resolved at runtime
-_BOOTSTRAP_ROOTS = ("artifacts-keyring-nofuss", "keyring")
+# Root packages to bootstrap -- their transitive deps are resolved at runtime.
+# Both keyring backends are listed; only the one actually installed is copied.
+_BOOTSTRAP_ROOTS = ("artifacts-keyring", "artifacts-keyring-nofuss", "keyring")
 
 
 def is_standalone() -> bool:

@@ -45,12 +45,12 @@ default = true
 ### Install and configure (using pypi-lockdown)
 
 ```bash
-pip install pypi-lockdown \
+pip install "pypi-lockdown[nofuss]" \
   --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
 python -m pypi_lockdown "$PRIVATE_FEED"
 ```
 
-This installs `keyring` + `artifacts-keyring-nofuss` and configures pip/uv in one step.  In an interactive shell with a `pyproject.toml` present, it will also offer to add the `[tool.uv]` + `[[tool.uv.index]]` config shown above directly to `pyproject.toml`; otherwise it writes user-level `uv.toml` and pip config.  Pass `--ci` to disable prompts.
+This installs `keyring` + `artifacts-keyring-nofuss` and configures pip/uv in one step.  (Use the `[nofuss]` extra for the pure-Python fork, or `[official]` for the upstream `artifacts-keyring`; a bare `pip install pypi-lockdown` installs no keyring backend.)  In an interactive shell with a `pyproject.toml` present, it will also offer to add the `[tool.uv]` + `[[tool.uv.index]]` config shown above directly to `pyproject.toml`; otherwise it writes user-level `uv.toml` and pip config.  Pass `--ci` to disable prompts.
 
 ### Alternative: manual setup
 
@@ -74,13 +74,13 @@ uv sync --locked # install from uv.lock
 
 ```bash
 # Activate your environment (venv, conda, etc.)
-pip install pypi-lockdown \
+pip install "pypi-lockdown[nofuss]" \
   --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
 
 python -m pypi_lockdown "$PRIVATE_FEED"
 ```
 
-This writes `pip.conf` (scoped to the active environment) and installs `keyring` + `artifacts-keyring-nofuss`.  All future `pip install` commands authenticate automatically.
+This writes `pip.conf` (scoped to the active environment) and installs `keyring` + `artifacts-keyring-nofuss` (swap the `[nofuss]` extra for `[official]` to use the upstream `artifacts-keyring`).  All future `pip install` commands authenticate automatically.
 
 For conda environments, run the same commands after `conda activate`.
 

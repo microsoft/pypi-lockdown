@@ -881,6 +881,22 @@ class TestResolveBootstrapAllowlist:
         assert "jaraco_classes" in allowed
         assert "requests" in allowed
 
+    def test_resolves_official_backend(self, tmp_path: Path) -> None:
+        # The official artifacts-keyring is also a bootstrap root, so it is
+        # copied when present (even without the nofuss fork installed).
+        self._make_pkg(tmp_path, "keyring", "25.6.0")
+        self._make_pkg(
+            tmp_path,
+            "artifacts-keyring",
+            "1.0.0",
+            ["keyring>=16.0"],
+        )
+
+        allowed = _resolve_bootstrap_allowlist(tmp_path)
+        assert "keyring" in allowed
+        assert "artifacts_keyring" in allowed
+        assert "artifacts_keyring_nofuss" not in allowed
+
     def test_excludes_pypi_lockdown(self, tmp_path: Path) -> None:
         self._make_pkg(
             tmp_path,
@@ -1130,9 +1146,9 @@ class TestPipxEndToEnd:
         env.pop("VIRTUAL_ENV", None)
         env.pop("CONDA_PREFIX", None)
 
-        # --- 2. pipx install pypi-lockdown from the local checkout ---
+        # --- 2. pipx install pypi-lockdown (with the nofuss backend) ---
         r = self._run(
-            ["pipx", "install", str(pkg_root), "--force"],
+            ["pipx", "install", f"{pkg_root}[nofuss]", "--force"],
             env=env,
         )
         assert r.returncode == 0, (

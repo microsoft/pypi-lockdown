@@ -395,5 +395,5 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
         if not pyproject.exists():
             _print_poetry_instructions(index_url)
 
-    print("artifacts-keyring will handle authentication transparently.")
+    print("The keyring backend will handle authentication transparently.")
     print()

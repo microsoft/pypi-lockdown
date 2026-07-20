@@ -27,7 +27,6 @@ classifiers = [
     "Topic :: System :: Installation/Setup",
 ]
 dependencies = [
-    "artifacts-keyring-nofuss>=0.6.0",
     "tomlkit>=0.12",
     # jaraco.context needs this on <3.12 but pip's cross-platform resolver
     # silently drops it with --only-binary — declare it explicitly so the
@@ -41,6 +40,12 @@ Repository = "https://github.com/microsoft/pypi-lockdown"
 Issues = "https://github.com/microsoft/pypi-lockdown/issues"
 
 [project.optional-dependencies]
+# Keyring backend that authenticates against the private feed. Choose one:
+#   [official] — the upstream Microsoft artifacts-keyring (requires .NET)
+#   [nofuss]   — the pure-Python artifacts-keyring-nofuss fork (no .NET,
+#                automation-friendly). Lives on the bootstrap feed.
+official = ["artifacts-keyring>=0.3"]
+nofuss = ["artifacts-keyring-nofuss>=0.6.0"]
 build = ["shiv", "tox"]
 dev = [
     "mypy>=1.10",

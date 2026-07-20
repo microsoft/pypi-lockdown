@@ -96,7 +96,7 @@ def build_native(dist_dir: Path, pip_args: list[str] | None = None) -> Path:
         "-o",
         str(output),
         "--compressed",
-        str(ROOT),
+        f"{ROOT}[official]",
     ]
     if pip_args:
         cmd.extend(pip_args)
@@ -126,7 +126,7 @@ def _resolve_deps(package_path: Path) -> list[str]:
                 "--report",
                 report_path,
                 "--quiet",
-                str(package_path),
+                f"{package_path}[official]",
             ]
         )
         report = json.loads(Path(report_path).read_text())
