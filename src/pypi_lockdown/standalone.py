@@ -544,6 +544,8 @@ def _keyring_cli_has_backend() -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
+    if result.returncode != 0:
+        return False
     return "ArtifactsKeyring" in result.stdout
 
 
@@ -551,7 +553,8 @@ def artifacts_backend_installed(env_path: Path | None) -> bool:
     """Return True if an artifacts-keyring backend can serve the feed.
 
     For an env-scoped config (*env_path* given) the backend must be importable
-    from that env's site-packages -- pip loads it in-process.  For a
+    from that env's site-packages -- pip loads it in-process, so a global
+    ``keyring`` CLI does not help and is deliberately not consulted.  For a
     user/global config (*env_path* is None) authentication happens through the
     ``keyring`` executable invoked as a subprocess, so we probe that CLI
     instead.  Plain ``keyring`` cannot authenticate an Azure Artifacts feed on
@@ -559,8 +562,8 @@ def artifacts_backend_installed(env_path: Path | None) -> bool:
     """
     if env_path is not None:
         dst = _target_site_packages(env_path)
-        if dst is not None:
-            installed = _installed_packages(dst)
-            if any(_normalise_name(b) in installed for b in _ARTIFACTS_BACKENDS):
-                return True
+        if dst is None:
+            return False
+        installed = _installed_packages(dst)
+        return any(_normalise_name(b) in installed for b in _ARTIFACTS_BACKENDS)
     return _keyring_cli_has_backend()

@@ -111,6 +111,25 @@ class TestPipConfigWriting:
         assert cfg.get("global", "index-url") == "https://example.com/simple/"
         assert cfg.get("install", "timeout") == "60"
 
+    def test_sets_subprocess_provider(self, tmp_path: Path) -> None:
+        path = tmp_path / "pip.conf"
+        _write_pip_config(path, "https://example.com/simple/", keyring_subprocess=True)
+        cfg = configparser.ConfigParser()
+        cfg.read(path)
+        assert cfg.get("global", "keyring-provider") == "subprocess"
+
+    def test_removes_stale_subprocess_provider(self, tmp_path: Path) -> None:
+        # An env-scoped (import model) rewrite must not keep a subprocess
+        # provider left over from an earlier global run.
+        path = tmp_path / "pip.conf"
+        path.write_text("[global]\nkeyring-provider = subprocess\n")
+
+        _write_pip_config(path, "https://example.com/simple/")
+
+        cfg = configparser.ConfigParser()
+        cfg.read(path)
+        assert not cfg.has_option("global", "keyring-provider")
+
 
 # ---------------------------------------------------------------------------
 # uv config writing
@@ -916,17 +935,31 @@ class TestArtifactsBackendInstalled:
 
         assert artifacts_backend_installed(tmp_path / "env") is True
 
-    def test_env_scope_missing_falls_back_to_cli(
+    def test_env_scope_missing_does_not_consult_cli(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # Env scope uses pip's in-process import model, so a global keyring
+        # CLI backend must NOT satisfy the check for the active environment.
         sp = tmp_path / "sp"
-        sp.mkdir()  # no backend, only, say, plain keyring is irrelevant here
+        sp.mkdir()  # no artifacts backend importable in the env
         monkeypatch.setattr(self._TGT, lambda _p: sp)
         monkeypatch.setattr(self._CLI, lambda: True)
 
-        assert artifacts_backend_installed(tmp_path / "env") is True
+        assert artifacts_backend_installed(tmp_path / "env") is False
+
+    def test_env_scope_unresolvable_site_packages(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # If the env's site-packages can't be resolved, env scope reports
+        # missing rather than falling back to the global CLI.
+        monkeypatch.setattr(self._TGT, lambda _p: None)
+        monkeypatch.setattr(self._CLI, lambda: True)
+
+        assert artifacts_backend_installed(tmp_path / "env") is False
 
     def test_env_scope_missing_everywhere(
         self,

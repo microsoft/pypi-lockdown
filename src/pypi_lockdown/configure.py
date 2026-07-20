@@ -170,6 +170,10 @@ def _write_pip_config(
         # Global scope: pip has no importable backend in arbitrary
         # interpreters, so authenticate via the `keyring` subprocess.
         cfg.set("global", "keyring-provider", "subprocess")
+    elif cfg.has_option("global", "keyring-provider"):
+        # Env scope uses the import model; drop a subprocess provider left
+        # over from a previous global run so it doesn't linger unexpectedly.
+        cfg.remove_option("global", "keyring-provider")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as fh:
