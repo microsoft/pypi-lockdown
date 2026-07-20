@@ -51,12 +51,13 @@ def main():
         description="Lock down pip/uv/poetry/hatch to use the {name} internal feed.",
     )
     parser.add_argument(
-        "--user",
+        "--env",
         action="store_true",
-        help="Write pip config to user home instead of the active Python environment",
+        help="Scope the lockdown to the active venv/conda environment instead"
+        " of the user-global default",
     )
     args = parser.parse_args()
-    configure(INDEX_URL, user_scope=args.user)
+    configure(INDEX_URL, env_scope=args.env)
 
 
 if __name__ == "__main__":

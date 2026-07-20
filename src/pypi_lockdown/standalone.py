@@ -26,6 +26,10 @@ _SKIP_PREFIXES = frozenset({"pypi_lockdown", "pypi-lockdown", "shiv", "_shiv"})
 # Both keyring backends are listed; only the one actually installed is copied.
 _BOOTSTRAP_ROOTS = ("artifacts-keyring", "artifacts-keyring-nofuss", "keyring")
 
+# Keyring backends that can authenticate an Azure Artifacts feed. Plain
+# ``keyring`` alone is not enough -- one of these must be installed.
+_ARTIFACTS_BACKENDS = ("artifacts-keyring", "artifacts-keyring-nofuss")
+
 
 def is_standalone() -> bool:
     """Return True if we're running inside a shiv zipapp."""
@@ -518,3 +522,45 @@ def bootstrap_keyring(env_path: Path) -> bool:
     copied = _copy_packages(src, dst, allowed, skip_pkgs)
     _report_bootstrap(copied, skipped_same, skipped_conflict)
     return bool(copied)
+
+
+def _keyring_cli_has_backend() -> bool:
+    """Return True if a ``keyring`` CLI on PATH exposes an artifacts backend.
+
+    uv (and pip with ``--keyring-provider subprocess``) authenticate by
+    invoking ``keyring`` as a subprocess, so a user/global install must expose
+    the backend through that executable rather than an importable module.
+    """
+    exe = shutil.which("keyring")
+    if exe is None:
+        return False
+    try:
+        result = subprocess.run(
+            [exe, "--list-backends"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "ArtifactsKeyring" in result.stdout
+
+
+def artifacts_backend_installed(env_path: Path | None) -> bool:
+    """Return True if an artifacts-keyring backend can serve the feed.
+
+    For an env-scoped config (*env_path* given) the backend must be importable
+    from that env's site-packages -- pip loads it in-process.  For a
+    user/global config (*env_path* is None) authentication happens through the
+    ``keyring`` executable invoked as a subprocess, so we probe that CLI
+    instead.  Plain ``keyring`` cannot authenticate an Azure Artifacts feed on
+    its own.
+    """
+    if env_path is not None:
+        dst = _target_site_packages(env_path)
+        if dst is not None:
+            installed = _installed_packages(dst)
+            if any(_normalise_name(b) in installed for b in _ARTIFACTS_BACKENDS):
+                return True
+    return _keyring_cli_has_backend()

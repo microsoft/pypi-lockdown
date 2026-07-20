@@ -32,6 +32,7 @@ from pypi_lockdown.standalone import (
     _process_site_packages,
     _resolve_bootstrap_allowlist,
     _runtime_deps,
+    artifacts_backend_installed,
     bootstrap_keyring,
 )
 
@@ -632,6 +633,97 @@ class TestCiFlag:
         assert f'url = "{_TOKEN_FEED_URL}"' in content
 
 
+class TestConfigureScope:
+    """Default is user-global (subprocess); --env locks the active venv."""
+
+    def test_global_default_writes_user_config_with_subprocess(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # An active venv must NOT change the default: global still wins.
+        monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "venv"))
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+
+        configure(_FEED_URL, ci=True)
+
+        # No venv pip.conf should be written in global mode
+        assert not (tmp_path / "venv" / "pip.conf").exists()
+        pip_conf = tmp_path / "pip" / "pip.conf"
+        assert pip_conf.exists()
+        cfg = configparser.ConfigParser()
+        cfg.read(pip_conf)
+        assert cfg.get("global", "index-url") == _FEED_URL
+        assert cfg.get("global", "keyring-provider") == "subprocess"
+
+    def test_env_scope_writes_venv_config_and_bootstraps(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        venv = tmp_path / "venv"
+        venv.mkdir()
+        monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        called: dict[str, object] = {}
+        monkeypatch.setattr(
+            "pypi_lockdown.standalone.bootstrap_keyring",
+            lambda p: called.setdefault("env", p) or False,
+        )
+
+        configure(_FEED_URL, env_scope=True, ci=True)
+
+        pip_conf = venv / "pip.conf"
+        assert pip_conf.exists()
+        cfg = configparser.ConfigParser()
+        cfg.read(pip_conf)
+        assert cfg.get("global", "index-url") == _FEED_URL
+        # env scope uses the import model -- no subprocess provider
+        assert not cfg.has_option("global", "keyring-provider")
+        assert called["env"] == venv
+
+    def test_env_scope_without_active_env_falls_back_to_global(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+
+        configure(_FEED_URL, env_scope=True, ci=True)
+
+        out = capsys.readouterr().out
+        assert "no active venv" in out
+        pip_conf = tmp_path / "pip" / "pip.conf"
+        cfg = configparser.ConfigParser()
+        cfg.read(pip_conf)
+        assert cfg.get("global", "keyring-provider") == "subprocess"
+
+
 # ---------------------------------------------------------------------------
 # Auto-detect feed URL
 # ---------------------------------------------------------------------------
@@ -784,6 +876,78 @@ class TestProcessSitePackages:
         assert sp is not None
         assert sp.is_dir()
         assert any(sp.glob("keyring-*.dist-info"))
+
+
+class TestArtifactsBackendInstalled:
+    """Tests for artifacts_backend_installed / _keyring_cli_has_backend."""
+
+    _TGT = "pypi_lockdown.standalone._target_site_packages"
+    _CLI = "pypi_lockdown.standalone._keyring_cli_has_backend"
+
+    @staticmethod
+    def _make_backend(site_packages: Path, name: str, version: str) -> None:
+        norm = name.replace("-", "_")
+        di = site_packages / f"{norm}-{version}.dist-info"
+        di.mkdir(parents=True)
+        (di / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
+
+    def test_env_scope_backend_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sp = tmp_path / "sp"
+        sp.mkdir()
+        self._make_backend(sp, "artifacts-keyring-nofuss", "0.8.0")
+        monkeypatch.setattr(self._TGT, lambda _p: sp)
+
+        assert artifacts_backend_installed(tmp_path / "env") is True
+
+    def test_env_scope_official_backend_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sp = tmp_path / "sp"
+        sp.mkdir()
+        self._make_backend(sp, "artifacts-keyring", "1.0.0")
+        monkeypatch.setattr(self._TGT, lambda _p: sp)
+
+        assert artifacts_backend_installed(tmp_path / "env") is True
+
+    def test_env_scope_missing_falls_back_to_cli(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sp = tmp_path / "sp"
+        sp.mkdir()  # no backend, only, say, plain keyring is irrelevant here
+        monkeypatch.setattr(self._TGT, lambda _p: sp)
+        monkeypatch.setattr(self._CLI, lambda: True)
+
+        assert artifacts_backend_installed(tmp_path / "env") is True
+
+    def test_env_scope_missing_everywhere(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sp = tmp_path / "sp"
+        sp.mkdir()
+        monkeypatch.setattr(self._TGT, lambda _p: sp)
+        monkeypatch.setattr(self._CLI, lambda: False)
+
+        assert artifacts_backend_installed(tmp_path / "env") is False
+
+    def test_user_scope_delegates_to_cli(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(self._CLI, lambda: True)
+        assert artifacts_backend_installed(None) is True
+
+        monkeypatch.setattr(self._CLI, lambda: False)
+        assert artifacts_backend_installed(None) is False
 
 
 class TestIsPurePython:
@@ -1190,7 +1354,7 @@ class TestPipxEndToEnd:
             "/pypi-lockdown/_packaging/public@Local/pypi/simple/"
         )
         r = self._run(
-            [str(pypi_lockdown_bin), "configure", feed_url],
+            [str(pypi_lockdown_bin), "configure", feed_url, "--env"],
             env=configure_env,
         )
         assert r.returncode == 0, (

@@ -35,9 +35,15 @@ def main() -> None:
         ),
     )
     p_configure.add_argument(
+        "--env",
+        action="store_true",
+        help="Scope the lockdown to the active venv/conda environment instead"
+        " of the user-global default",
+    )
+    p_configure.add_argument(
         "--user",
         action="store_true",
-        help="Write pip config to user home instead of the active Python environment",
+        help=argparse.SUPPRESS,  # deprecated: user-global is now the default
     )
     p_configure.add_argument(
         "--ci",
@@ -99,7 +105,7 @@ def main() -> None:
             print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
         configure(
             index_url,
-            user_scope=getattr(args, "user", False),
+            env_scope=getattr(args, "env", False),
             ci=getattr(args, "ci", False),
         )
         if getattr(args, "verify", False):

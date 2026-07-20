@@ -154,13 +154,22 @@ def _uv_config_user() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _write_pip_config(path: Path, index_url: str) -> None:
+def _write_pip_config(
+    path: Path,
+    index_url: str,
+    *,
+    keyring_subprocess: bool = False,
+) -> None:
     cfg = configparser.ConfigParser()
     if path.exists():
         cfg.read(path)
     if not cfg.has_section("global"):
         cfg.add_section("global")
     cfg.set("global", "index-url", index_url)
+    if keyring_subprocess:
+        # Global scope: pip has no importable backend in arbitrary
+        # interpreters, so authenticate via the `keyring` subprocess.
+        cfg.set("global", "keyring-provider", "subprocess")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as fh:
@@ -351,7 +360,7 @@ def _configure_pyproject(index_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> None:
+def configure(index_url: str, *, env_scope: bool = False, ci: bool = False) -> None:
     if not index_url.startswith("https://"):
         print(
             f"\n  ERROR: Refusing to configure non-HTTPS index URL: {index_url}\n"
@@ -363,24 +372,34 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
 
     print(f"\nConfiguring index: {index_url}\n")
 
+    # env scope requires an active environment; fall back to global otherwise
+    if env_scope and env is None:
+        print(
+            "  Note: --env given but no active venv/conda environment detected;"
+            " configuring user-global instead.\n"
+        )
+        env_scope = False
+
     # --- pip ---
-    if env and not user_scope:
+    if env_scope:
+        assert env is not None  # noqa: S101  (narrowed by fallback above)
         print(f"Python environment: {env}\n")
         _write_pip_config(_pip_config_env(env), index_url)
     else:
-        if env:
-            print("Writing to user directory (--user).\n")
-        else:
-            print("No Python environment detected -- writing to user directory.\n")
-        _write_pip_config(_pip_config_user(), index_url)
+        print(
+            "Configuring user-global (all environments). Use --env to scope"
+            " to the active environment only.\n"
+        )
+        _write_pip_config(_pip_config_user(), index_url, keyring_subprocess=True)
 
     # --- uv (user-level only) ---
     _write_uv_config(_uv_config_user(), index_url)
 
-    # --- bootstrap keyring into target env ---
-    if env and not user_scope:
+    # --- bootstrap keyring into target env (env scope only) ---
+    if env_scope:
         from .standalone import bootstrap_keyring  # noqa: PLC0415
 
+        assert env is not None  # noqa: S101
         print(f"Bootstrapping keyring packages into {env} ...")
         if not bootstrap_keyring(env):
             print("  Already up to date.")
@@ -395,5 +414,40 @@ def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> 
         if not pyproject.exists():
             _print_poetry_instructions(index_url)
 
-    print("The keyring backend will handle authentication transparently.")
+    # --- verify a keyring backend is present ---
+    from .standalone import artifacts_backend_installed  # noqa: PLC0415
+
+    backend_env = env if env_scope else None
+    if artifacts_backend_installed(backend_env):
+        print("The keyring backend will handle authentication transparently.")
+    elif env_scope:
+        print(
+            "  WARNING: No artifacts-keyring backend is installed in this "
+            "environment, so the feed cannot authenticate yet.\n"
+            "    Install one from your public bootstrap feed (the feed you"
+            " installed pypi-lockdown from):\n"
+            "      pip install artifacts-keyring-nofuss"
+            " --index-url <PUBLIC_FEED_URL>   # pure-Python fork\n"
+            "      pip install artifacts-keyring"
+            " --index-url <PUBLIC_FEED_URL>          # upstream (requires .NET)"
+        )
+    else:
+        # User/global scope: uv/pip authenticate via the `keyring` subprocess,
+        # so a global `keyring` CLI must expose the backend. Recommend a tool
+        # install rather than adding the backend to some interpreter. Both
+        # backends live on the public bootstrap feed, so target it.
+        print(
+            "  WARNING: No global 'keyring' backend found on PATH, so the "
+            "feed cannot authenticate yet.\n"
+            "    Install keyring as a tool with an artifacts backend, from your"
+            " public bootstrap feed (the feed you installed pypi-lockdown"
+            " from):\n"
+            "      uv tool install keyring --with artifacts-keyring-nofuss"
+            " --index-url <PUBLIC_FEED_URL>   # pure-Python fork\n"
+            "      uv tool install keyring --with artifacts-keyring"
+            " --index-url <PUBLIC_FEED_URL>          # upstream (requires .NET)\n"
+            "      # pipx equivalent: pipx install keyring"
+            " --index-url <PUBLIC_FEED_URL>"
+            " && pipx inject keyring <backend> --index-url <PUBLIC_FEED_URL>"
+        )
     print()

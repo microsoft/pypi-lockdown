@@ -19,11 +19,29 @@ Configuring Python package managers to install from an Azure DevOps Artifacts fe
 
 ---
 
-Set `$PRIVATE_FEED` to your team's feed URL, e.g.:
+Set `$PRIVATE_FEED` to your team's feed URL and `$PUBLIC_FEED` to the public
+bootstrap feed that hosts `pypi-lockdown` + the keyring backends, e.g.:
 
 ```bash
 PRIVATE_FEED="https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/"
+PUBLIC_FEED="https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
 ```
+
+## Install the keyring backend (once)
+
+uv and pip authenticate to the private feed by invoking a global `keyring`
+command, so install it once as a tool with an Azure Artifacts backend — from the
+**public** feed (the backends are hosted there, not on the private feed):
+
+```bash
+# pure-Python fork (no .NET, automation-friendly)
+uv tool install keyring --with artifacts-keyring-nofuss --index-url "$PUBLIC_FEED"
+# ...or the upstream backend (requires .NET):
+uv tool install keyring --with artifacts-keyring     --index-url "$PUBLIC_FEED"
+```
+
+(`pipx` works too: `pipx install keyring --index-url "$PUBLIC_FEED" && pipx
+inject keyring artifacts-keyring-nofuss --index-url "$PUBLIC_FEED"`.)
 
 # Setup
 
@@ -45,21 +63,20 @@ default = true
 ### Install and configure (using pypi-lockdown)
 
 ```bash
-pip install "pypi-lockdown[nofuss]" \
-  --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
-python -m pypi_lockdown "$PRIVATE_FEED"
+pip install pypi-lockdown --index-url "$PUBLIC_FEED"
+pypi-lockdown "$PRIVATE_FEED"
 ```
 
-This installs `keyring` + `artifacts-keyring-nofuss` and configures pip/uv in one step.  (Use the `[nofuss]` extra for the pure-Python fork, or `[official]` for the upstream `artifacts-keyring`; a bare `pip install pypi-lockdown` installs no keyring backend.)  In an interactive shell with a `pyproject.toml` present, it will also offer to add the `[tool.uv]` + `[[tool.uv.index]]` config shown above directly to `pyproject.toml`; otherwise it writes user-level `uv.toml` and pip config.  Pass `--ci` to disable prompts.
+This writes **user-global** pip + uv config (with `keyring-provider = subprocess`)
+pointing at your feed — so every environment authenticates via the global
+`keyring` tool installed above.  In an interactive shell with a `pyproject.toml`
+present, it also offers to add the `[tool.uv]` + `[[tool.uv.index]]` config shown
+above directly to `pyproject.toml`.  Pass `--ci` to disable prompts.
 
 ### Alternative: manual setup
 
-```bash
-uv tool install keyring --with artifacts-keyring-nofuss \
-  --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
-```
-
-Then add the `pyproject.toml` section above by hand.
+Skip `pypi-lockdown` and add the `pyproject.toml` section above (plus a
+user-level `uv.toml`) by hand.
 
 ### Usage
 
@@ -70,19 +87,22 @@ uv sync --locked # install from uv.lock
 
 ## Option 2: pip / conda
 
-### One-time environment setup
+### One-time setup
 
 ```bash
-# Activate your environment (venv, conda, etc.)
-pip install "pypi-lockdown[nofuss]" \
-  --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
-
-python -m pypi_lockdown "$PRIVATE_FEED"
+pip install pypi-lockdown --index-url "$PUBLIC_FEED"
+pypi-lockdown "$PRIVATE_FEED"
 ```
 
-This writes `pip.conf` (scoped to the active environment) and installs `keyring` + `artifacts-keyring-nofuss` (swap the `[nofuss]` extra for `[official]` to use the upstream `artifacts-keyring`).  All future `pip install` commands authenticate automatically.
+This writes user-global `pip.conf` with `keyring-provider = subprocess`, so all
+future `pip install` commands (in any environment, conda included) authenticate
+automatically via the global `keyring` tool.
 
-For conda environments, run the same commands after `conda activate`.
+> **Lock down a single environment instead?** Activate it and run
+> `pypi-lockdown --env "$PRIVATE_FEED"`.  That writes `pip.conf` into the active
+> environment and copies a backend into it, so first install
+> `pip install "pypi-lockdown[nofuss]" --index-url "$PUBLIC_FEED"` (or
+> `[official]`).
 
 ### Usage
 
@@ -96,9 +116,8 @@ pip install -r requirements.txt
 If your project already has a `pyproject.toml` with the feed URL configured, team members can simply run:
 
 ```bash
-pip install pypi-lockdown \
-  --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
-python -m pypi_lockdown        # auto-detects feed URL from pyproject.toml
+pip install pypi-lockdown --index-url "$PUBLIC_FEED"
+pypi-lockdown        # auto-detects feed URL from pyproject.toml
 ```
 
 ## Install uv (hash-verified)

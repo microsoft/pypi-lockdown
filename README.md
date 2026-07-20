@@ -5,43 +5,47 @@
 [![Python](https://img.shields.io/pypi/pyversions/pypi-lockdown)](https://pypi.org/project/pypi-lockdown/)
 [![License](https://img.shields.io/github/license/microsoft/pypi-lockdown)](LICENSE)
 
-Bootstrap a Python environment so that **all** packages are pulled from an
-internal, authenticated PyPI feed.  Install this package first, then every
-subsequent `pip install` / `uv add` will use the configured feed — with a
-`keyring` backend handling credentials transparently.
+Bootstrap Python tooling so that **all** packages are pulled from an internal,
+authenticated PyPI feed.  `pypi-lockdown` writes **user-global** pip/uv config
+pointing at your feed, and a `keyring` backend supplies credentials
+transparently for every environment.
 
-> **Pick a keyring backend.** `pypi-lockdown` ships no backend by default.
-> Install an extra so the feed can authenticate:
-> - `pypi-lockdown[official]` — the upstream `artifacts-keyring` (requires .NET).
-> - `pypi-lockdown[nofuss]` — the pure-Python
->   [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss)
->   fork (no .NET, automation-friendly). Distributed on the bootstrap feed.
->
-> A bare `pip install pypi-lockdown` writes config but installs no backend, so
-> the feed won't authenticate until you add one of the extras.
+> **You need a keyring backend.** uv and pip authenticate by invoking a global
+> `keyring` command (the `subprocess` provider), so install it once as a tool
+> with an Azure Artifacts backend — from your **public bootstrap feed**:
+> ```bash
+> uv tool install keyring --with artifacts-keyring-nofuss \
+>     --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
+> ```
+> Use `artifacts-keyring-nofuss` (pure-Python fork, no .NET) or the upstream
+> `artifacts-keyring` (needs .NET) — install either from the same public feed.
+> `configure` prints the exact command if no backend is found.
 
 📖 **[Full setup guide](docs/securing-python-packaging.md)** — covers uv, pip, conda, CI pipelines, Docker, GitHub Actions, and devcontainers.
 
 ## Quick start
 
 ```bash
-# 1. Create & activate a fresh environment
-python -m venv .venv && source .venv/bin/activate   # venv (Linux / macOS)
-python -m venv .venv && .venv\Scripts\activate       # venv (Windows)
-conda create -n myenv python && conda activate myenv # conda
-
-# 2. Install pypi-lockdown (with a keyring backend) from the public feed
-pip install "pypi-lockdown[official]" \
+# 1. Install a global keyring backend once, from your public bootstrap feed
+uv tool install keyring --with artifacts-keyring-nofuss \
     --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
-# ...or the pure-Python fork: pip install "pypi-lockdown[nofuss]"
 
-# 3. Lock down the environment to use the authenticated feed
-python -m pypi_lockdown \
+# 2. Install pypi-lockdown from the public feed
+pip install pypi-lockdown \
+    --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
+
+# 3. Write user-global config pointing at your authenticated feed
+pypi-lockdown \
     https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
 
-# 4. Done — all future installs use the authenticated feed
-pip install requests   # resolved from PRIVATE_FEED, authenticated via the keyring backend
+# 4. Done — every environment now installs from the authenticated feed
+pip install requests   # resolved from PRIVATE_FEED, authenticated via keyring
 ```
+
+> **Scope to a single environment instead?** Activate the venv/conda env and
+> run `pypi-lockdown --env <FEED>`.  This writes config into that environment
+> only and copies a backend into it, so install
+> `pip install "pypi-lockdown[nofuss]"` (or `[official]`) beforehand.
 
 ### Standalone `.pyz` (build locally)
 
@@ -69,8 +73,8 @@ index:
 
 | Tool       | Scope                 | File written                                    |
 |------------|----------------------|-------------------------------------------------|
-| **pip**    | environment (default) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
-| **pip**    | user (fallback)      | `~/.config/pip/pip.conf` (platform-aware)       |
+| **pip**    | user (default)        | `~/.config/pip/pip.conf` (platform-aware), with `keyring-provider = subprocess` |
+| **pip**    | environment (`--env`) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
 | **uv**     | user                 | `~/.config/uv/uv.toml` (platform-aware)        |
 | **uv**     | project (prompted)   | `./pyproject.toml` `[tool.uv]` section          |
 | **Poetry** | project (prompted)   | `./pyproject.toml` `[[tool.poetry.source]]`     |
@@ -105,7 +109,7 @@ poetry source add --priority=explicit PyPI
 ## CLI reference
 
 ```
-python -m pypi_lockdown [configure] [INDEX_URL] [--user] [--ci] [--verify]
+python -m pypi_lockdown [configure] [INDEX_URL] [--env] [--ci] [--verify]
 python -m pypi_lockdown verify INDEX_URL
 python -m pypi_lockdown scaffold NAME INDEX_URL
 ```
@@ -118,8 +122,8 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 
 | Flag       | Effect |
 |------------|--------|
-| *(none)*   | Target the active environment; prompt to update `pyproject.toml` if present. |
-| `--user`   | Write pip config to user home instead of the active environment. |
+| *(none)*   | Write user-global config for all environments; prompt to update `pyproject.toml` if present. |
+| `--env`    | Scope the lockdown to the active venv/conda environment and copy a backend into it. |
 | `--ci`     | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
 | `--verify` | After configuring, verify the feed is reachable and authentication works. |
 
