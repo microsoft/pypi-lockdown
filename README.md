@@ -44,31 +44,6 @@ pypi-lockdown \
 pip install requests   # resolved from PRIVATE_FEED, authenticated via keyring
 ```
 
-> **Scope to a single environment instead?** Activate the venv/conda env and
-> run `pypi-lockdown --env <FEED>`.  This writes config into that environment
-> only and copies a backend into it, so pypi-lockdown must have a backend
-> available — install it with the extra: `uv tool install "pypi-lockdown[nofuss]"`
-> (or `[official]`), or `pip install "pypi-lockdown[nofuss]"` into that env.
-
-### Standalone `.pyz` (build locally)
-
-For environments where you can't `pip install` first, you can build a
-standalone `.pyz` zipapp that bundles all dependencies:
-
-```bash
-pip install tox shiv
-tox -e standalone -- linux-x86_64    # or macos-universal2, win-amd64
-python dist/pypi-lockdown-linux-x86_64.pyz \
-    https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PRIVATE_FEED/pypi/simple/
-```
-
-This writes pip/uv config files **and** installs the official `artifacts-keyring`
-plus all its dependencies into the active environment — no network access to
-any package feed required.
-
-> `.pyz` files are platform-specific (Linux, macOS, Windows) because
-> `cryptography` contains native extensions.
-
 ## What it does
 
 `pypi-lockdown` writes configuration files that redirect the default package
@@ -77,7 +52,6 @@ index:
 | Tool       | Scope                 | File written                                    |
 |------------|----------------------|-------------------------------------------------|
 | **pip**    | user (default)        | `~/.config/pip/pip.conf` (platform-aware), with `keyring-provider = subprocess` |
-| **pip**    | environment (`--env`) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
 | **uv**     | user                 | `~/.config/uv/uv.toml` (platform-aware)        |
 | **uv**     | project (`--project`) | `./pyproject.toml` `[tool.uv]` section          |
 | **Poetry** | project (`--project`) | `./pyproject.toml` `[[tool.poetry.source]]`     |
@@ -114,7 +88,7 @@ poetry source add --priority=explicit PyPI
 ## CLI reference
 
 ```
-python -m pypi_lockdown [configure] [INDEX_URL] [--env] [--project] [--ci] [--verify]
+python -m pypi_lockdown [configure] [INDEX_URL] [--project] [--ci] [--verify]
 python -m pypi_lockdown status
 python -m pypi_lockdown undo [--project]
 python -m pypi_lockdown verify INDEX_URL
@@ -132,7 +106,6 @@ python -m pypi_lockdown scaffold NAME INDEX_URL
 | Flag       | Effect |
 |------------|--------|
 | *(none)*   | Write user-global config for all environments (covers pip, uv, and Hatch). |
-| `--env`    | Scope the lockdown to the active venv/conda environment and copy a backend into it. |
 | `--project` | Also write project-level config into `./pyproject.toml` (uv/Poetry/Hatch). Needed for Poetry. |
 | `--ci`     | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
 | `--verify` | After configuring, verify the feed is reachable and authentication works. |
@@ -167,7 +140,6 @@ This creates a ready-to-publish package:
 ```
 ai4s-pypi-lockdown/
 ├── pyproject.toml
-├── tox.ini
 └── src/ai4s_pypi_lockdown/
     ├── __init__.py
     └── __main__.py
@@ -180,13 +152,6 @@ pip install ai4s-pypi-lockdown --index-url https://pkgs.dev.azure.com/.../PUBLIC
 python -m ai4s_pypi_lockdown
 ```
 
-Scaffolded packages can also build their own standalone `.pyz` files:
-
-```bash
-cd ai4s-pypi-lockdown
-tox -e standalone       # builds ai4s-pypi-lockdown-{platform}.pyz
-```
-
 ## Creating a release
 
 Create a GitHub release — the CI workflow builds a wheel and sdist, attaches
@@ -196,13 +161,6 @@ them to the release, and publishes to the ADO PyPI feed:
 gh release create v1.0.0 --generate-notes
 ```
 
-To build a standalone `.pyz` locally (e.g. for air-gapped environments):
-
-```bash
-pip install tox shiv
-tox -e standalone -- linux-x86_64    # or macos-universal2, win-amd64
-```
-
 ## Security model
 
 - **HTTPS required**: `configure` rejects non-HTTPS index URLs — HTTP would expose
@@ -210,9 +168,6 @@ tox -e standalone -- linux-x86_64    # or macos-universal2, win-amd64
 - **Build provenance**: Wheel and sdist releases are built in CI with
   [signed build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
   — verify with `gh attestation verify <file> --owner microsoft`.
-- **Standalone `.pyz` integrity**: When building `.pyz` locally for air-gapped
-  use, the build includes zip-slip protection that validates no archive entry
-  escapes the staging directory.
 - **Narrow config scope**: `pypi-lockdown` only writes `index-url` to pip/uv/hatch config
   files. It does not modify global Python settings or install hooks.
 

@@ -11,30 +11,6 @@ permissions:
   id-token: write  # for attestation signing
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [linux-x86_64, macos-universal2, win-amd64]
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0  # setuptools-scm needs tags for versioning
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install build tools
-        run: pip install tox shiv build
-
-      - name: Build .pyz for ${{ matrix.platform }}
-        run: tox -e standalone -- ${{ matrix.platform }}
-
-      # .pyz files are not published (they bundle third-party code) but we
-      # keep the build as a CI check.  To distribute .pyz files, build
-      # locally with: tox -e standalone -- <platform>
-
   build-python-dist:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +37,7 @@ jobs:
           path: dist/
 
   release:
-    needs: [build, build-python-dist]
+    needs: [build-python-dist]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # for uploading release assets

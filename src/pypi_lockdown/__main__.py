@@ -35,12 +35,6 @@ def main() -> None:
         ),
     )
     p_configure.add_argument(
-        "--env",
-        action="store_true",
-        help="Scope the lockdown to the active venv/conda environment instead"
-        " of the user-global default",
-    )
-    p_configure.add_argument(
         "--project",
         action="store_true",
         help="Also write project-level config (uv/poetry/hatch) into"
@@ -130,7 +124,6 @@ def main() -> None:
             print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
         configure(
             index_url,
-            env_scope=getattr(args, "env", False),
             project_scope=getattr(args, "project", False),
             ci=getattr(args, "ci", False),
         )

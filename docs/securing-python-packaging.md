@@ -109,14 +109,6 @@ This writes user-global `pip.conf` with `keyring-provider = subprocess`, so all
 future `pip install` commands (in any environment, conda included) authenticate
 automatically via the global `keyring` tool.
 
-> **Lock down a single environment instead?** Activate it and run
-> `pypi-lockdown --env "$PRIVATE_FEED"`.  That writes `pip.conf` into the active
-> environment and copies a backend into it, so pypi-lockdown needs a backend
-> available: install it with the extra —
-> `uv tool install "pypi-lockdown[nofuss]" --index-url "$PUBLIC_FEED"` (or
-> `[official]`), or `pip install "pypi-lockdown[nofuss]" --index-url "$PUBLIC_FEED"`
-> into that env.
-
 ### Usage
 
 ```bash

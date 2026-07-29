@@ -46,7 +46,6 @@ Issues = "https://github.com/microsoft/pypi-lockdown/issues"
 #                automation-friendly). Lives on the bootstrap feed.
 official = ["artifacts-keyring>=0.3"]
 nofuss = ["artifacts-keyring-nofuss>=0.6.0"]
-build = ["shiv", "tox"]
 dev = [
     "keyring>=24",
     "mypy>=1.10",
@@ -72,13 +71,12 @@ ignore = [
     "ISC001",   # single-line-implicit-string-concat — conflicts with ruff formatter
     "D",        # pydocstyle — docstring coverage is intentionally minimal
     "T201",     # print — this is a CLI tool, print is the primary output mechanism
-    "S603",     # subprocess-without-shell-equals-true — we call known build tools
-    "S607",     # start-process-with-partial-path — we intentionally call pip/shiv by name
+    "S603",     # subprocess-without-shell-equals-true — we call known tools (keyring, pip)
+    "S607",     # start-process-with-partial-path — we intentionally call keyring/pip by name
     "PLR2004",  # magic-value-comparison — status codes are self-documenting
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"_build_standalone.py" = ["S404"]  # subprocess module usage is intentional in build scripts
 "tests/*" = ["S101"]  # assert is the standard way to write pytest tests
 
 [tool.mypy]
