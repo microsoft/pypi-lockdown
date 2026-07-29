@@ -63,9 +63,15 @@ default = true
 ### Install and configure (using pypi-lockdown)
 
 ```bash
-pip install pypi-lockdown --index-url "$PUBLIC_FEED"
+uv tool install pypi-lockdown --index-url "$PUBLIC_FEED"   # standalone CLI
 pypi-lockdown "$PRIVATE_FEED"
 ```
+
+`pypi-lockdown`'s base package only depends on `tomlkit`, so install it as a
+standalone CLI with `uv tool install` (or `pipx install pypi-lockdown
+--index-url "$PUBLIC_FEED"`) — it doesn't need to live inside your project
+environment. A plain `pip install pypi-lockdown --index-url "$PUBLIC_FEED"` into
+any environment works too.
 
 This writes **user-global** pip + uv config (with `keyring-provider = subprocess`)
 pointing at your feed — so every environment authenticates via the global
@@ -95,7 +101,7 @@ uv sync --locked # install from uv.lock
 ### One-time setup
 
 ```bash
-pip install pypi-lockdown --index-url "$PUBLIC_FEED"
+uv tool install pypi-lockdown --index-url "$PUBLIC_FEED"   # or pipx / pip
 pypi-lockdown "$PRIVATE_FEED"
 ```
 
@@ -105,9 +111,11 @@ automatically via the global `keyring` tool.
 
 > **Lock down a single environment instead?** Activate it and run
 > `pypi-lockdown --env "$PRIVATE_FEED"`.  That writes `pip.conf` into the active
-> environment and copies a backend into it, so first install
-> `pip install "pypi-lockdown[nofuss]" --index-url "$PUBLIC_FEED"` (or
-> `[official]`).
+> environment and copies a backend into it, so pypi-lockdown needs a backend
+> available: install it with the extra —
+> `uv tool install "pypi-lockdown[nofuss]" --index-url "$PUBLIC_FEED"` (or
+> `[official]`), or `pip install "pypi-lockdown[nofuss]" --index-url "$PUBLIC_FEED"`
+> into that env.
 
 ### Usage
 
@@ -121,7 +129,7 @@ pip install -r requirements.txt
 If your project already has a `pyproject.toml` with the feed URL configured, team members can simply run:
 
 ```bash
-pip install pypi-lockdown --index-url "$PUBLIC_FEED"
+uv tool install pypi-lockdown --index-url "$PUBLIC_FEED"   # or pipx / pip
 pypi-lockdown        # auto-detects feed URL from pyproject.toml
 ```
 
@@ -205,7 +213,7 @@ steps:
 ```yaml
 steps:
   - script: |
-      pip install pypi-lockdown \
+      pip install "pypi-lockdown[nofuss]" \
         --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
       python -m pypi_lockdown --ci "$PRIVATE_FEED"
       pip install -r requirements.txt

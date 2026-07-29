@@ -30,9 +30,11 @@ transparently for every environment.
 uv tool install keyring --with artifacts-keyring-nofuss \
     --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
 
-# 2. Install pypi-lockdown from the public feed
-pip install pypi-lockdown \
+# 2. Install pypi-lockdown as a standalone CLI (base package only needs tomlkit)
+uv tool install pypi-lockdown \
     --index-url https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/PUBLIC_FEED/pypi/simple/
+# (pipx works too: pipx install pypi-lockdown --index-url <PUBLIC_FEED>;
+#  or plain `pip install pypi-lockdown --index-url <PUBLIC_FEED>` into any env)
 
 # 3. Write user-global config pointing at your authenticated feed
 pypi-lockdown \
@@ -44,8 +46,9 @@ pip install requests   # resolved from PRIVATE_FEED, authenticated via keyring
 
 > **Scope to a single environment instead?** Activate the venv/conda env and
 > run `pypi-lockdown --env <FEED>`.  This writes config into that environment
-> only and copies a backend into it, so install
-> `pip install "pypi-lockdown[nofuss]"` (or `[official]`) beforehand.
+> only and copies a backend into it, so pypi-lockdown must have a backend
+> available — install it with the extra: `uv tool install "pypi-lockdown[nofuss]"`
+> (or `[official]`), or `pip install "pypi-lockdown[nofuss]"` into that env.
 
 ### Standalone `.pyz` (build locally)
 
