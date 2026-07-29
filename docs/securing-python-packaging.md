@@ -174,10 +174,20 @@ uv sync          # or: pip install <package>
 
 ## ADO pipeline (uv)
 
+uv is **not** served from the feed — install it out-of-band first (see
+[Install uv (hash-verified)](#install-uv-hash-verified)), then bootstrap the
+keyring backend from the feed:
+
 ```yaml
 steps:
   - script: |
-      pip install uv keyring artifacts-keyring-nofuss \
+      # install uv out-of-band; pin + hash-verify per "Install uv (hash-verified)"
+      curl -fsSL "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+    displayName: Install uv
+    env:
+      UV_VERSION: "0.10.12"
+  - script: |
+      pip install keyring artifacts-keyring-nofuss \
         --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
       uv sync --locked
     env:
@@ -211,8 +221,13 @@ steps:
       tenant-id: ${{ secrets.AZURE_TENANT_ID }}
       allow-no-subscriptions: true
 
+  # uv is NOT served from the feed — install it out-of-band.
+  - uses: astral-sh/setup-uv@v6
+    with:
+      version: "0.10.12"
+
   - run: |
-      pip install uv keyring artifacts-keyring-nofuss \
+      pip install keyring artifacts-keyring-nofuss \
         --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
       uv sync --locked
     env:
@@ -227,8 +242,13 @@ If the runner has a managed identity with access to the ADO feed, authentication
 
 ```yaml
 steps:
+  # uv is NOT served from the feed — install it out-of-band.
+  - uses: astral-sh/setup-uv@v6
+    with:
+      version: "0.10.12"
+
   - run: |
-      pip install uv keyring artifacts-keyring-nofuss \
+      pip install keyring artifacts-keyring-nofuss \
         --index-url "https://pkgs.dev.azure.com/pypi-lockdown/pypi-lockdown/_packaging/public@Local/pypi/simple/"
       uv sync --locked
     env:
