@@ -13,6 +13,7 @@ from pypi_lockdown.configure import (
     _MARKER,
     _ensure_userinfo,
     _keyring_backend_available,
+    _resolve_keyring_cli,
     _strip_userinfo,
     _write_pip_config,
     _write_pyproject_hatch,
@@ -24,6 +25,7 @@ from pypi_lockdown.configure import (
     status,
     undo,
 )
+from pypi_lockdown.verify import _looks_like_auth_failure, verify
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -739,6 +741,166 @@ class TestKeyringBackendAvailable:
 
         monkeypatch.setattr("subprocess.run", fake_run)
         assert _keyring_backend_available() is False
+
+
+class TestResolveKeyringCli:
+    """pip skips a keyring installed alongside pip; _resolve mirrors that."""
+
+    def test_returns_none_when_no_keyring(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda _name, **_k: None)
+        assert _resolve_keyring_cli() is None
+
+    def test_returns_cli_outside_scripts_dir(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A keyring not in the interpreter's scripts dir is used as-is.
+        monkeypatch.setattr("shutil.which", lambda _name, **_k: "/usr/bin/keyring")
+        assert _resolve_keyring_cli() == "/usr/bin/keyring"
+
+    def test_skips_keyring_in_scripts_dir(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Mirror pip: if the first keyring lives in the active env's scripts
+        # dir, it must be skipped and PATH re-searched for the next one.
+        scripts = tmp_path / "env" / "bin"
+        scripts.mkdir(parents=True)
+        env_keyring = str(scripts / "keyring")
+        system_keyring = "/usr/bin/keyring"
+
+        monkeypatch.setattr("sysconfig.get_path", lambda _name: str(scripts))
+
+        calls: list[str | None] = []
+
+        def fake_which(_name: str, path: str | None = None) -> str:
+            calls.append(path)
+            # First call (path=None) finds the env keyring; the re-search
+            # (path excludes the scripts dir) finds the system one.
+            return env_keyring if path is None else system_keyring
+
+        monkeypatch.setattr("shutil.which", fake_which)
+        monkeypatch.setenv("PATH", f"{scripts}:/usr/bin")
+
+        assert _resolve_keyring_cli() == system_keyring
+        # A re-search happened with a PATH that no longer includes scripts.
+        assert calls[-1] is not None
+        assert str(scripts) not in calls[-1]
+
+
+class TestLooksLikeAuthFailure:
+    def test_detects_auth_failures(self) -> None:
+        for output in (
+            "ERROR: HTTP error 401 Client Error: Unauthorized",
+            "403 Forbidden",
+            "WARNING: ... Unauthorized for url",
+            "Could not fetch URL https://feed/pip/: 401 Client Error",
+        ):
+            assert _looks_like_auth_failure(output) is True, output
+
+    def test_ignores_non_auth_output(self) -> None:
+        for output in (
+            "Could not find a version that satisfies the requirement",
+            "No matching distribution found for pip",
+            "Connection timed out",
+            "Found credentials in keyring for feed",
+            "",
+        ):
+            assert _looks_like_auth_failure(output) is False, output
+
+
+class TestVerify:
+    def test_passes_no_input_ignore_installed_and_closes_stdin(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, list[str]] = {}
+        stdin_seen: list[object] = []
+
+        def fake_run(
+            cmd: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            captured["cmd"] = cmd
+            stdin_seen.append(kwargs.get("stdin"))
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="")
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        verify("https://example.com/simple/")
+
+        cmd = captured["cmd"]
+        assert "--no-input" in cmd
+        assert "--ignore-installed" in cmd
+        assert stdin_seen == [subprocess.DEVNULL]
+
+    def test_timeout_exits_nonzero_without_hanging(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fake_run(
+            cmd: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            raise subprocess.TimeoutExpired(cmd, 60)
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        with pytest.raises(SystemExit):
+            verify("https://example.com/simple/")
+
+    def test_auth_failure_prints_keyring_hint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def fake_run(
+            cmd: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "  Could not fetch URL https://feed/pip/: 401 Client Error: "
+                    "Unauthorized\nERROR: No matching distribution found for pip"
+                ),
+            )
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        with pytest.raises(SystemExit):
+            verify("https://example.com/simple/")
+
+        out = capsys.readouterr().out
+        assert "Authentication to the feed failed" in out
+        assert "authentication problem" in out
+        assert "artifacts-keyring-nofuss" in out
+
+    def test_reachable_but_missing_probe_is_ok(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Feed authenticated fine (no 401/403) but doesn't mirror `pip`.
+        def fake_run(
+            cmd: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr="ERROR: No matching distribution found for pip",
+            )
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        verify("https://example.com/simple/")  # must NOT raise
+
+        out = capsys.readouterr().out
+        assert "OK Feed is reachable and authentication works" in out
 
 
 # ---------------------------------------------------------------------------

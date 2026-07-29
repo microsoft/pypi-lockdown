@@ -7,6 +7,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sysconfig
 from pathlib import Path
 
 _MARKER = (
@@ -346,20 +347,36 @@ def _hint_project_config() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _keyring_backend_available() -> bool:
-    """Return True if a ``keyring`` CLI on PATH exposes an artifacts backend.
+def _resolve_keyring_cli() -> str | None:
+    """Resolve the ``keyring`` executable pip's subprocess provider will use.
 
-    uv (and pip with ``--keyring-provider subprocess``) authenticate by
-    invoking ``keyring`` as a subprocess, so the backend must be reachable
-    through that executable. Plain ``keyring`` alone cannot authenticate an
-    Azure Artifacts feed.
+    pip deliberately ignores a ``keyring`` installed *alongside pip* (in the
+    running interpreter's scripts directory) and falls back to the next
+    ``keyring`` on ``PATH``. We mirror that logic here so this check reflects
+    the binary pip actually invokes -- not one pip will skip. See
+    ``pip._internal.network.auth.get_keyring_provider``.
     """
-    exe = shutil.which("keyring")
-    if exe is None:
-        return False
+    cli = shutil.which("keyring")
+    scripts = sysconfig.get_path("scripts")
+    if cli and scripts and cli.startswith(scripts):
+        scripts_dir = Path(scripts)
+        remaining: list[str] = []
+        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep):
+            try:
+                if Path(entry).samefile(scripts_dir):
+                    continue
+            except OSError:
+                pass
+            remaining.append(entry)
+        cli = shutil.which("keyring", path=os.pathsep.join(remaining))
+    return cli
+
+
+def _keyring_cli_has_backend(cli: str) -> bool:
+    """Return True if the given ``keyring`` CLI exposes an artifacts backend."""
     try:
         result = subprocess.run(
-            [exe, "--list-backends"],
+            [cli, "--list-backends"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -368,6 +385,18 @@ def _keyring_backend_available() -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0 and "ArtifactsKeyring" in result.stdout
+
+
+def _keyring_backend_available() -> bool:
+    """Return True if the ``keyring`` pip will invoke exposes an artifacts backend.
+
+    uv (and pip with ``--keyring-provider subprocess``) authenticate by
+    invoking ``keyring`` as a subprocess, so the backend must be reachable
+    through *that* executable. Plain ``keyring`` alone cannot authenticate an
+    Azure Artifacts feed.
+    """
+    cli = _resolve_keyring_cli()
+    return cli is not None and _keyring_cli_has_backend(cli)
 
 
 def configure(
@@ -399,19 +428,29 @@ def configure(
         _hint_project_config()
 
     # --- verify a keyring backend is present ---
-    if _keyring_backend_available():
-        print("The keyring backend will handle authentication transparently.")
+    cli = _resolve_keyring_cli()
+    if cli is not None and _keyring_cli_has_backend(cli):
+        print(f"The keyring backend at {cli} will handle authentication.")
     else:
         # uv/pip authenticate via the `keyring` subprocess, so a global
-        # `keyring` CLI must expose the backend. Recommend a tool install
-        # rather than adding the backend to some interpreter. Both backends
-        # live on the public bootstrap feed, so target it.
+        # `keyring` CLI must expose the backend. Crucially, pip *ignores* a
+        # keyring installed alongside pip (in the active venv/conda env) and
+        # uses the next one on PATH -- so the backend must live on a global
+        # keyring tool. Recommend installing one from the public bootstrap
+        # feed. Both backends live there, so target it.
+        found = (
+            f"    The 'keyring' pip would use is {cli}, which lacks the backend.\n"
+            if cli is not None
+            else "    No 'keyring' executable was found on PATH.\n"
+        )
         print(
-            "  WARNING: No global 'keyring' backend found on PATH, so the "
+            "  WARNING: No usable global 'keyring' backend found, so the "
             "feed cannot authenticate yet.\n"
-            "    Install keyring as a tool with an artifacts backend, from your"
-            " public bootstrap feed (the feed you installed pypi-lockdown"
-            " from):\n"
+            f"{found}"
+            "    Note: pip ignores a keyring installed in the active"
+            " venv/conda env, so install it as a *global* tool with an"
+            " artifacts backend, from your public bootstrap feed (the feed you"
+            " installed pypi-lockdown from):\n"
             "      uv tool install keyring --with artifacts-keyring-nofuss"
             " --index-url <PUBLIC_FEED_URL>   # pure-Python fork\n"
             "      uv tool install keyring --with artifacts-keyring"
