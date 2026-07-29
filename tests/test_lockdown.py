@@ -1620,12 +1620,13 @@ class TestUndo:
         monkeypatch.chdir(tmp_path)
         pip_conf, _ = _patch_global_paths(tmp_path, monkeypatch)
         pip_conf.parent.mkdir(parents=True, exist_ok=True)
-        pip_conf.write_text("[global]\nindex-url = https://example.com/simple/\n")
+        original = "[global]\nindex-url = https://example.com/simple/\n"
+        pip_conf.write_text(original)
 
         undo()
         # File lacks the marker, so it must be left untouched.
         assert pip_conf.exists()
-        assert "example.com" in pip_conf.read_text()
+        assert pip_conf.read_text() == original
 
     def test_project_scope_removes_pyproject_config(
         self,
