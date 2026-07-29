@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .configure import configure, detect_index_url
+from .configure import configure, detect_index_url, status, undo
 from .scaffold import scaffold
 from .verify import verify
 
@@ -39,6 +39,14 @@ def main() -> None:
         action="store_true",
         help="Scope the lockdown to the active venv/conda environment instead"
         " of the user-global default",
+    )
+    p_configure.add_argument(
+        "--project",
+        action="store_true",
+        help="Also write project-level config (uv/poetry/hatch) into"
+        " ./pyproject.toml. Off by default; global config already covers"
+        " pip, uv, and Hatch. Use this to pin the index in-project or to"
+        " configure Poetry.",
     )
     p_configure.add_argument(
         "--user",
@@ -83,8 +91,25 @@ def main() -> None:
         help="Internal feed URL to hardcode",
     )
 
+    # --- status ---
+    sub.add_parser(
+        "status",
+        help="Show the current pip/uv/project index configuration",
+    )
+
+    # --- undo ---
+    p_undo = sub.add_parser(
+        "undo",
+        help="Remove pypi-lockdown-managed configuration",
+    )
+    p_undo.add_argument(
+        "--project",
+        action="store_true",
+        help="Also remove project-level config from ./pyproject.toml",
+    )
+
     # Allow bare `python -m pypi_lockdown URL` as shorthand for `configure URL`
-    _commands = {"configure", "scaffold", "verify", "-h", "--help"}
+    _commands = {"configure", "scaffold", "verify", "status", "undo", "-h", "--help"}
     argv = sys.argv[1:]
     if argv and argv[0] not in _commands:
         argv = ["configure", *argv]
@@ -106,12 +131,17 @@ def main() -> None:
         configure(
             index_url,
             env_scope=getattr(args, "env", False),
+            project_scope=getattr(args, "project", False),
             ci=getattr(args, "ci", False),
         )
         if getattr(args, "verify", False):
             verify(index_url)
     elif args.command == "verify":
         verify(args.index_url)
+    elif args.command == "status":
+        status()
+    elif args.command == "undo":
+        undo(project_scope=getattr(args, "project", False))
     elif args.command == "scaffold":
         scaffold(args.name, args.index_url)
 

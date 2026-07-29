@@ -76,15 +76,17 @@ index:
 | **pip**    | user (default)        | `~/.config/pip/pip.conf` (platform-aware), with `keyring-provider = subprocess` |
 | **pip**    | environment (`--env`) | `$VIRTUAL_ENV/pip.conf` or `$CONDA_PREFIX/pip.conf` |
 | **uv**     | user                 | `~/.config/uv/uv.toml` (platform-aware)        |
-| **uv**     | project (prompted)   | `./pyproject.toml` `[tool.uv]` section          |
-| **Poetry** | project (prompted)   | `./pyproject.toml` `[[tool.poetry.source]]`     |
-| **Hatch**  | project (if `[tool.hatch]` exists) | `./pyproject.toml` `[tool.hatch.envs.default.env-vars]` |
+| **uv**     | project (`--project`) | `./pyproject.toml` `[tool.uv]` section          |
+| **Poetry** | project (`--project`) | `./pyproject.toml` `[[tool.poetry.source]]`     |
+| **Hatch**  | project (`--project`, if `[tool.hatch]` exists) | `./pyproject.toml` `[tool.hatch.envs.default.env-vars]` |
 
-When run inside a project directory (containing `pyproject.toml`), the tool
-offers to configure uv, Poetry, and Hatch settings directly in the project
-file — including `keyring-provider` and index URLs with the `__token__@` prefix
-that uv requires for keyring authentication. Hatch configuration is only written
-when an existing `[tool.hatch]` section is detected.
+By default `pypi-lockdown` only writes user-global config, which already covers
+pip, uv, and Hatch (Hatch shells out to pip/uv). Pass `--project` to also write
+index settings directly into `./pyproject.toml` — including `keyring-provider`
+and index URLs with the `__token__@` prefix that uv requires for keyring
+authentication. This is the main way to configure **Poetry**, which ignores
+pip/uv config. Hatch configuration is only written when an existing
+`[tool.hatch]` section is detected.
 
 Works with **venv**, **conda**, and any other environment manager that sets
 `VIRTUAL_ENV` or `CONDA_PREFIX`.
@@ -98,8 +100,8 @@ Works with **venv**, **conda**, and any other environment manager that sets
 
 ### Manual Poetry setup
 
-If you run `pypi-lockdown` outside a project directory (no `pyproject.toml`),
-or decline the prompt, you can configure Poetry manually:
+If you don't pass `--project` (no `pyproject.toml` edits), or you run
+`pypi-lockdown` outside a project directory, you can configure Poetry manually:
 
 ```bash
 poetry source add --priority=primary internal https://pkgs.dev.azure.com/ORG/PROJECT/_packaging/FEED/pypi/simple/
@@ -109,21 +111,26 @@ poetry source add --priority=explicit PyPI
 ## CLI reference
 
 ```
-python -m pypi_lockdown [configure] [INDEX_URL] [--env] [--ci] [--verify]
+python -m pypi_lockdown [configure] [INDEX_URL] [--env] [--project] [--ci] [--verify]
+python -m pypi_lockdown status
+python -m pypi_lockdown undo [--project]
 python -m pypi_lockdown verify INDEX_URL
 python -m pypi_lockdown scaffold NAME INDEX_URL
 ```
 
 | Command      | Effect |
 |--------------|--------|
-| `configure`  | Write pip and uv config files, and optionally update project `pyproject.toml` for Poetry/Hatch (default when omitted). |
+| `configure`  | Write user-global pip and uv config files; with `--project`, also update `./pyproject.toml` for uv/Poetry/Hatch (default when omitted). |
+| `status`     | Show the current pip/uv/project index configuration and whether each file is managed by pypi-lockdown. |
+| `undo`       | Remove pypi-lockdown-managed configuration (global pip/uv; add `--project` to also clean `./pyproject.toml`). Non-managed files and unrelated settings are left untouched. |
 | `verify`     | Test that the configured feed is reachable and authentication works. |
 | `scaffold`   | Generate a wrapper package that hardcodes a private feed URL. |
 
 | Flag       | Effect |
 |------------|--------|
-| *(none)*   | Write user-global config for all environments; prompt to update `pyproject.toml` if present. |
+| *(none)*   | Write user-global config for all environments (covers pip, uv, and Hatch). |
 | `--env`    | Scope the lockdown to the active venv/conda environment and copy a backend into it. |
+| `--project` | Also write project-level config into `./pyproject.toml` (uv/Poetry/Hatch). Needed for Poetry. |
 | `--ci`     | Non-interactive CI mode: skip `pyproject.toml` modification and poetry instructions. |
 | `--verify` | After configuring, verify the feed is reachable and authentication works. |
 

@@ -15,6 +15,7 @@ import tomlkit
 
 from pypi_lockdown._build_standalone import _extract_wheels
 from pypi_lockdown.configure import (
+    _MARKER,
     _ensure_userinfo,
     _pip_config_env,
     _strip_userinfo,
@@ -25,6 +26,8 @@ from pypi_lockdown.configure import (
     _write_uv_config,
     configure,
     detect_index_url,
+    status,
+    undo,
 )
 from pypi_lockdown.standalone import (
     _installed_packages,
@@ -485,7 +488,7 @@ class TestPyprojectHatch:
         assert env_vars["PIP_INDEX_URL"] == _FEED_URL
 
 
-class TestConfigurePyprojectPrompt:
+class TestConfigureProjectScope:
     def test_skips_when_no_pyproject(
         self,
         tmp_path: Path,
@@ -507,7 +510,7 @@ class TestConfigurePyprojectPrompt:
         # No pyproject.toml should exist
         assert not (tmp_path / "pyproject.toml").exists()
 
-    def test_writes_when_confirmed(
+    def test_writes_when_project_scope(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -524,18 +527,14 @@ class TestConfigurePyprojectPrompt:
         )
         monkeypatch.delenv("VIRTUAL_ENV", raising=False)
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
-        monkeypatch.setattr(
-            "pypi_lockdown.configure._prompt_yes_no",
-            lambda _prompt: True,
-        )
 
-        configure(_FEED_URL)
+        configure(_FEED_URL, project_scope=True)
 
         content = (tmp_path / "pyproject.toml").read_text()
         assert "tool.uv" in content or "keyring-provider" in content
         assert "tool.poetry" in content or "internal" in content
 
-    def test_skips_when_declined(
+    def test_skips_project_config_by_default(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -553,14 +552,34 @@ class TestConfigurePyprojectPrompt:
         )
         monkeypatch.delenv("VIRTUAL_ENV", raising=False)
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
-        monkeypatch.setattr(
-            "pypi_lockdown.configure._prompt_yes_no",
-            lambda _prompt: False,
-        )
 
         configure(_FEED_URL)
 
+        # Without --project, pyproject.toml is left untouched
         assert (tmp_path / "pyproject.toml").read_text() == original
+
+    def test_hints_project_config_when_pyproject_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'mypkg'\n")
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+
+        configure(_FEED_URL)
+
+        assert "--project" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -1500,3 +1519,140 @@ class TestPipxEndToEnd:
             f"Dummy backend failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
         )
         assert r.stdout.strip() == "dummy-secret-token"
+
+
+# ---------------------------------------------------------------------------
+# status / undo
+# ---------------------------------------------------------------------------
+
+
+def _patch_global_paths(
+    tmp_path: _Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[_Path, _Path]:
+    """Point user pip/uv config at temp paths and clear env vars."""
+    pip_conf = tmp_path / "pip" / "pip.conf"
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    monkeypatch.setattr("pypi_lockdown.configure._pip_config_user", lambda: pip_conf)
+    monkeypatch.setattr("pypi_lockdown.configure._uv_config_user", lambda: uv_toml)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
+    return pip_conf, uv_toml
+
+
+class TestStatus:
+    def test_reports_managed_configs(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+        configure(_FEED_URL)
+        capsys.readouterr()  # discard configure output
+
+        status()
+        out = capsys.readouterr().out
+        assert "[managed]" in out
+        assert _FEED_URL in out
+
+    def test_reports_unconfigured(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+
+        status()
+        out = capsys.readouterr().out
+        assert "(not configured)" in out
+        assert "[managed]" not in out
+
+
+class TestUndo:
+    def test_removes_managed_configs(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        pip_conf, uv_toml = _patch_global_paths(tmp_path, monkeypatch)
+        configure(_FEED_URL)
+        assert pip_conf.exists()
+        assert uv_toml.exists()
+
+        undo()
+        assert not pip_conf.exists()
+        assert not uv_toml.exists()
+
+    def test_keeps_unmanaged_pip_settings(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        pip_conf, _ = _patch_global_paths(tmp_path, monkeypatch)
+        configure(_FEED_URL)
+
+        cfg = configparser.ConfigParser()
+        cfg.read(pip_conf)
+        cfg.add_section("install")
+        cfg.set("install", "user", "true")
+
+        with pip_conf.open("w") as fh:
+            fh.write(_MARKER)
+            cfg.write(fh)
+
+        undo()
+        assert pip_conf.exists()
+        result = configparser.ConfigParser()
+        result.read(pip_conf)
+        assert result.has_section("install")
+        assert not result.has_option("global", "index-url")
+
+    def test_ignores_unmanaged_files(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        pip_conf, _ = _patch_global_paths(tmp_path, monkeypatch)
+        pip_conf.parent.mkdir(parents=True, exist_ok=True)
+        pip_conf.write_text("[global]\nindex-url = https://example.com/simple/\n")
+
+        undo()
+        # File lacks the marker, so it must be left untouched.
+        assert pip_conf.exists()
+        assert "example.com" in pip_conf.read_text()
+
+    def test_project_scope_removes_pyproject_config(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname = 'x'\n[tool.hatch]\n"
+        )
+        configure(_FEED_URL, project_scope=True)
+        assert detect_index_url() == _FEED_URL
+
+        undo(project_scope=True)
+        assert detect_index_url() is None
+
+    def test_default_scope_keeps_pyproject_config(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        configure(_FEED_URL, project_scope=True)
+        assert detect_index_url() == _FEED_URL
+
+        undo()  # no --project
+        assert detect_index_url() == _FEED_URL

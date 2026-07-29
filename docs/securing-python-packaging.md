@@ -1,4 +1,4 @@
-Configuring Python package managers to install from an Azure DevOps Artifacts feed using [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss) and [`pypi-lockdown`](https://github.com/microsoft/pypi-lockdown) — pure-Python, no .NET, and automation-friendly (`pypi-lockdown` only prompts in interactive shells; `--ci` or non-TTY execution disables prompts).
+Configuring Python package managers to install from an Azure DevOps Artifacts feed using [`artifacts-keyring-nofuss`](https://github.com/microsoft/artifacts-keyring-nofuss) and [`pypi-lockdown`](https://github.com/microsoft/pypi-lockdown) — pure-Python, no .NET, and automation-friendly (`pypi-lockdown` writes user-global config by default and never prompts; opt into project-level edits with `--project`).
 
 ## Contents
 
@@ -69,9 +69,14 @@ pypi-lockdown "$PRIVATE_FEED"
 
 This writes **user-global** pip + uv config (with `keyring-provider = subprocess`)
 pointing at your feed — so every environment authenticates via the global
-`keyring` tool installed above.  In an interactive shell with a `pyproject.toml`
-present, it also offers to add the `[tool.uv]` + `[[tool.uv.index]]` config shown
-above directly to `pyproject.toml`.  Pass `--ci` to disable prompts.
+`keyring` tool installed above.  Global config already covers pip, uv, and
+Hatch; pass `--project` to *also* write `[tool.uv]` + `[[tool.uv.index]]` (and
+Poetry/Hatch) config directly into `./pyproject.toml`.
+
+> **Inspect or roll back:** run `pypi-lockdown status` to see which pip/uv/project
+> files are configured (and which are managed by pypi-lockdown), or
+> `pypi-lockdown undo` to remove the managed global config again (add `--project`
+> to also clean `./pyproject.toml`).
 
 ### Alternative: manual setup
 
