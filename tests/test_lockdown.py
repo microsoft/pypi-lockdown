@@ -5,17 +5,16 @@ from __future__ import annotations
 import configparser
 import os
 import subprocess
-import sys
-import zipfile
-from pathlib import Path as _Path
 from typing import TYPE_CHECKING
 
 import pytest
 import tomlkit
 
-from pypi_lockdown._build_standalone import _extract_wheels
 from pypi_lockdown.configure import (
+    _MARKER,
     _ensure_userinfo,
+    _keyring_backend_available,
+    _resolve_keyring_cli,
     _strip_userinfo,
     _write_pip_config,
     _write_pyproject_hatch,
@@ -24,19 +23,14 @@ from pypi_lockdown.configure import (
     _write_uv_config,
     configure,
     detect_index_url,
+    status,
+    undo,
 )
-from pypi_lockdown.standalone import (
-    _installed_packages,
-    _is_pure_python,
-    _normalise_name,
-    _process_site_packages,
-    _resolve_bootstrap_allowlist,
-    _runtime_deps,
-    bootstrap_keyring,
-)
+from pypi_lockdown.verify import _looks_like_auth_failure, verify
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from pathlib import Path as _Path
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +103,13 @@ class TestPipConfigWriting:
         assert cfg.get("global", "index-url") == "https://example.com/simple/"
         assert cfg.get("install", "timeout") == "60"
 
+    def test_sets_subprocess_provider(self, tmp_path: Path) -> None:
+        path = tmp_path / "pip.conf"
+        _write_pip_config(path, "https://example.com/simple/")
+        cfg = configparser.ConfigParser()
+        cfg.read(path)
+        assert cfg.get("global", "keyring-provider") == "subprocess"
+
 
 # ---------------------------------------------------------------------------
 # uv config writing
@@ -156,150 +157,6 @@ class TestEnsureUserinfo:
             _ensure_userinfo("https://example.com:8080/simple/")
             == "https://__token__@example.com:8080/simple/"
         )
-
-
-# ---------------------------------------------------------------------------
-# Zip-slip protection
-# ---------------------------------------------------------------------------
-
-
-class TestZipSlipProtection:
-    def _make_wheel(self, path: Path, entries: dict[str, bytes]) -> None:
-        """Create a .whl file (which is just a zip) with the given entries."""
-        with zipfile.ZipFile(path, "w") as zf:
-            for name, data in entries.items():
-                zf.writestr(name, data)
-
-    def test_normal_wheel_extracts(self, tmp_path: Path) -> None:
-        wheel_dir = tmp_path / "wheels"
-        staging = tmp_path / "staging"
-        wheel_dir.mkdir()
-
-        self._make_wheel(
-            wheel_dir / "pkg-1.0-py3-none-any.whl",
-            {"pkg/__init__.py": b"# ok", "pkg/module.py": b"# ok"},
-        )
-
-        _extract_wheels(wheel_dir, staging)
-        assert (staging / "pkg" / "__init__.py").exists()
-
-    def test_path_traversal_rejected(self, tmp_path: Path) -> None:
-        wheel_dir = tmp_path / "wheels"
-        staging = tmp_path / "staging"
-        wheel_dir.mkdir()
-
-        self._make_wheel(
-            wheel_dir / "evil-1.0-py3-none-any.whl",
-            {"../../etc/evil.conf": b"malicious"},
-        )
-
-        with pytest.raises(ValueError, match="path traversal"):
-            _extract_wheels(wheel_dir, staging)
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap: version-aware skip logic
-# ---------------------------------------------------------------------------
-
-
-class TestBootstrapKeyring:
-    """Test _installed_packages and bootstrap_keyring skip/warn behaviour."""
-
-    def _make_site_packages(
-        self,
-        base: Path,
-        packages: dict[str, str],
-    ) -> Path:
-        """Create a fake site-packages with .dist-info dirs and stub modules."""
-        sp = base / "site-packages"
-        sp.mkdir(parents=True)
-        for name, version in packages.items():
-            di = sp / f"{name}-{version}.dist-info"
-            di.mkdir()
-            (di / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
-            pkg_dir = sp / name
-            pkg_dir.mkdir(exist_ok=True)
-            (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
-        return sp
-
-    def test_installed_packages_parses_dist_info(self, tmp_path: Path) -> None:
-        sp = self._make_site_packages(tmp_path, {"keyring": "25.0.0"})
-        result = _installed_packages(sp)
-        assert result == {"keyring": "25.0.0"}
-
-    def test_skips_same_version(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        src = self._make_site_packages(tmp_path / "src", {"keyring": "25.6.0"})
-        dst = self._make_site_packages(tmp_path / "dst", {"keyring": "25.6.0"})
-
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._shiv_site_packages",
-            lambda: src,
-        )
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._target_site_packages",
-            lambda _p: dst,
-        )
-
-        result = bootstrap_keyring(tmp_path / "env")
-        assert result is False  # nothing new installed
-        out = capsys.readouterr().out
-        assert "Already installed" in out
-        assert "keyring-25.6.0" in out
-
-    def test_warns_on_version_mismatch(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        src = self._make_site_packages(tmp_path / "src", {"keyring": "25.6.0"})
-        dst = self._make_site_packages(tmp_path / "dst", {"keyring": "25.0.0"})
-
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._shiv_site_packages",
-            lambda: src,
-        )
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._target_site_packages",
-            lambda _p: dst,
-        )
-
-        result = bootstrap_keyring(tmp_path / "env")
-        assert result is False  # skipped, not installed
-        out = capsys.readouterr().out
-        assert "Skipped" in out
-        assert "installed 25.0.0" in out
-        assert "bundled 25.6.0" in out
-
-    def test_installs_missing_package(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        src = self._make_site_packages(tmp_path / "src", {"keyring": "25.6.0"})
-        dst = tmp_path / "dst" / "site-packages"
-        dst.mkdir(parents=True)  # empty target
-
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._shiv_site_packages",
-            lambda: src,
-        )
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._target_site_packages",
-            lambda _p: dst,
-        )
-
-        result = bootstrap_keyring(tmp_path / "env")
-        assert result is True
-        out = capsys.readouterr().out
-        assert "Installed" in out
-        assert (dst / "keyring" / "__init__.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +321,7 @@ class TestPyprojectHatch:
         assert env_vars["PIP_INDEX_URL"] == _FEED_URL
 
 
-class TestConfigurePyprojectPrompt:
+class TestConfigureProjectScope:
     def test_skips_when_no_pyproject(
         self,
         tmp_path: Path,
@@ -486,7 +343,7 @@ class TestConfigurePyprojectPrompt:
         # No pyproject.toml should exist
         assert not (tmp_path / "pyproject.toml").exists()
 
-    def test_writes_when_confirmed(
+    def test_writes_when_project_scope(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -503,18 +360,14 @@ class TestConfigurePyprojectPrompt:
         )
         monkeypatch.delenv("VIRTUAL_ENV", raising=False)
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
-        monkeypatch.setattr(
-            "pypi_lockdown.configure._prompt_yes_no",
-            lambda _prompt: True,
-        )
 
-        configure(_FEED_URL)
+        configure(_FEED_URL, project_scope=True)
 
         content = (tmp_path / "pyproject.toml").read_text()
         assert "tool.uv" in content or "keyring-provider" in content
         assert "tool.poetry" in content or "internal" in content
 
-    def test_skips_when_declined(
+    def test_skips_project_config_by_default(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -532,14 +385,34 @@ class TestConfigurePyprojectPrompt:
         )
         monkeypatch.delenv("VIRTUAL_ENV", raising=False)
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
-        monkeypatch.setattr(
-            "pypi_lockdown.configure._prompt_yes_no",
-            lambda _prompt: False,
-        )
 
         configure(_FEED_URL)
 
+        # Without --project, pyproject.toml is left untouched
         assert (tmp_path / "pyproject.toml").read_text() == original
+
+    def test_hints_project_config_when_pyproject_present(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'mypkg'\n")
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+
+        configure(_FEED_URL)
+
+        assert "--project" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +503,39 @@ class TestCiFlag:
         assert uv_toml.exists()
         content = uv_toml.read_text()
         assert f'url = "{_TOKEN_FEED_URL}"' in content
+
+
+class TestConfigureScope:
+    """Configuration is always user-global (subprocess keyring provider)."""
+
+    def test_global_default_writes_user_config_with_subprocess(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # An active venv must NOT change anything: config is always global.
+        monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "venv"))
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._uv_config_user",
+            lambda: tmp_path / "uv" / "uv.toml",
+        )
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._pip_config_user",
+            lambda: tmp_path / "pip" / "pip.conf",
+        )
+
+        configure(_FEED_URL, ci=True)
+
+        # No venv pip.conf should be written -- only user-global
+        assert not (tmp_path / "venv" / "pip.conf").exists()
+        pip_conf = tmp_path / "pip" / "pip.conf"
+        assert pip_conf.exists()
+        cfg = configparser.ConfigParser()
+        cfg.read(pip_conf)
+        assert cfg.get("global", "index-url") == _FEED_URL
+        assert cfg.get("global", "keyring-provider") == "subprocess"
 
 
 # ---------------------------------------------------------------------------
@@ -772,517 +678,365 @@ class TestStripUserinfo:
         )
 
 
-# ---------------------------------------------------------------------------
-# Process site-packages discovery & allowlist
-# ---------------------------------------------------------------------------
+class TestKeyringBackendAvailable:
+    """Tests for _keyring_backend_available (global keyring CLI probe)."""
 
-
-class TestProcessSitePackages:
-    def test_finds_current_process_site_packages(self) -> None:
-        sp = _process_site_packages()
-        # We're running inside an env that has keyring installed
-        assert sp is not None
-        assert sp.is_dir()
-        assert any(sp.glob("keyring-*.dist-info"))
-
-
-class TestIsPurePython:
-    def _make_dist_info(
-        self, site_packages: Path, name: str, version: str, tag: str
-    ) -> None:
-        di = site_packages / f"{name}-{version}.dist-info"
-        di.mkdir(parents=True)
-        (di / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
-        (di / "WHEEL").write_text(f"Wheel-Version: 1.0\nTag: {tag}\n")
-
-    def test_pure_python(self, tmp_path: Path) -> None:
-        self._make_dist_info(tmp_path, "mypkg", "1.0", "py3-none-any")
-        assert _is_pure_python(tmp_path, "mypkg") is True
-
-    def test_c_extension(self, tmp_path: Path) -> None:
-        self._make_dist_info(
-            tmp_path, "mypkg", "1.0", "cp312-cp312-manylinux_2_34_x86_64"
-        )
-        assert _is_pure_python(tmp_path, "mypkg") is False
-
-    def test_abi3(self, tmp_path: Path) -> None:
-        self._make_dist_info(
-            tmp_path, "mypkg", "1.0", "cp311-abi3-manylinux_2_34_x86_64"
-        )
-        assert _is_pure_python(tmp_path, "mypkg") is True
-
-
-class TestRuntimeDeps:
-    def test_extracts_deps(self, tmp_path: Path) -> None:
-        di = tmp_path / "mypkg-1.0.dist-info"
-        di.mkdir()
-        (di / "METADATA").write_text(
-            "Name: mypkg\nVersion: 1.0\n"
-            "Requires-Dist: requests>=2.20\n"
-            "Requires-Dist: keyring>=23.0\n"
-            "Requires-Dist: pytest; extra == 'dev'\n"
-        )
-        deps = _runtime_deps(tmp_path, "mypkg")
-        assert "requests" in deps
-        assert "keyring" in deps
-        assert "pytest" not in deps
-
-
-class TestResolveBootstrapAllowlist:
-    def _make_pkg(
+    def test_returns_false_when_keyring_not_on_path(
         self,
-        site_packages: Path,
-        name: str,
-        version: str,
-        deps: list[str] | None = None,
-        *,
-        tag: str = "py3-none-any",
-    ) -> None:
-        norm = _normalise_name(name)
-        di = site_packages / f"{norm}-{version}.dist-info"
-        di.mkdir(parents=True)
-        meta = f"Name: {name}\nVersion: {version}\n"
-        for d in deps or []:
-            meta += f"Requires-Dist: {d}\n"
-        (di / "METADATA").write_text(meta)
-        (di / "WHEEL").write_text(f"Wheel-Version: 1.0\nTag: {tag}\n")
-
-        # Handle namespace packages (e.g. jaraco.classes → jaraco/classes/)
-        import_parts = [p.replace("-", "_") for p in name.split(".")]
-        if len(import_parts) == 1:
-            pkg_dir = site_packages / import_parts[0]
-            pkg_dir.mkdir(exist_ok=True)
-            (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
-            (di / "top_level.txt").write_text(f"{import_parts[0]}\n")
-        else:
-            ns_dir = site_packages
-            for part in import_parts[:-1]:
-                ns_dir = ns_dir / part
-                ns_dir.mkdir(exist_ok=True)
-            leaf = ns_dir / import_parts[-1]
-            leaf.mkdir(exist_ok=True)
-            (leaf / "__init__.py").write_text(f"__version__ = '{version}'\n")
-            (di / "top_level.txt").write_text(f"{import_parts[0]}\n")
-
-    def test_resolves_transitive_deps(self, tmp_path: Path) -> None:
-        self._make_pkg(tmp_path, "keyring", "25.6.0", ["jaraco.classes"])
-        self._make_pkg(
-            tmp_path,
-            "artifacts-keyring-nofuss",
-            "0.8.0",
-            ["keyring>=23.0", "requests>=2.20"],
-        )
-        self._make_pkg(tmp_path, "jaraco.classes", "3.4.0")
-        self._make_pkg(tmp_path, "requests", "2.32.0")
-
-        allowed = _resolve_bootstrap_allowlist(tmp_path)
-        assert "keyring" in allowed
-        assert "artifacts_keyring_nofuss" in allowed
-        assert "jaraco_classes" in allowed
-        assert "requests" in allowed
-
-    def test_excludes_pypi_lockdown(self, tmp_path: Path) -> None:
-        self._make_pkg(
-            tmp_path,
-            "artifacts-keyring-nofuss",
-            "0.8.0",
-            ["keyring>=23.0"],
-        )
-        self._make_pkg(tmp_path, "keyring", "25.6.0")
-        self._make_pkg(tmp_path, "pypi-lockdown", "0.9.0")
-
-        allowed = _resolve_bootstrap_allowlist(tmp_path)
-        assert "pypi_lockdown" not in allowed
-
-    def test_skips_c_extensions(self, tmp_path: Path) -> None:
-        self._make_pkg(
-            tmp_path,
-            "artifacts-keyring-nofuss",
-            "0.8.0",
-            ["cryptography>=2.5"],
-        )
-        self._make_pkg(tmp_path, "keyring", "25.6.0")
-        self._make_pkg(
-            tmp_path,
-            "cryptography",
-            "43.0.0",
-            tag="cp312-cp312-manylinux_2_34_x86_64",
-        )
-
-        allowed = _resolve_bootstrap_allowlist(tmp_path)
-        assert "cryptography" not in allowed
-
-    def test_includes_c_extensions_when_native_ok(self, tmp_path: Path) -> None:
-        self._make_pkg(
-            tmp_path,
-            "artifacts-keyring-nofuss",
-            "0.8.0",
-            ["cryptography>=2.5"],
-        )
-        self._make_pkg(tmp_path, "keyring", "25.6.0")
-        self._make_pkg(
-            tmp_path,
-            "cryptography",
-            "43.0.0",
-            tag="cp312-cp312-manylinux_2_34_x86_64",
-        )
-
-        allowed = _resolve_bootstrap_allowlist(tmp_path, native_ok=True)
-        assert "cryptography" in allowed
-
-
-class TestBootstrapFromProcess:
-    """Test bootstrap_keyring in process (non-shiv) mode."""
-
-    def _make_site_packages(
-        self,
-        base: Path,
-        packages: dict[str, str],
-    ) -> Path:
-        sp = base / "site-packages"
-        sp.mkdir(parents=True)
-        for name, version in packages.items():
-            di = sp / f"{name}-{version}.dist-info"
-            di.mkdir()
-            (di / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
-            (di / "WHEEL").write_text("Wheel-Version: 1.0\nTag: py3-none-any\n")
-            (di / "top_level.txt").write_text(f"{name}\n")
-            pkg_dir = sp / name
-            pkg_dir.mkdir(exist_ok=True)
-            (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
-        return sp
-
-    _SHIV = "pypi_lockdown.standalone._shiv_site_packages"
-    _PROC = "pypi_lockdown.standalone._process_site_packages"
-    _TGT = "pypi_lockdown.standalone._target_site_packages"
-
-    def test_same_env_skips(
-        self,
-        tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """When source and target are the same dir, nothing is copied."""
-        sp = self._make_site_packages(
-            tmp_path / "env",
-            {"keyring": "25.6.0"},
-        )
+        monkeypatch.setattr("shutil.which", lambda _name: None)
+        assert _keyring_backend_available() is False
 
-        monkeypatch.setattr(self._SHIV, lambda: None)
-        monkeypatch.setattr(self._PROC, lambda: sp)
-        monkeypatch.setattr(self._TGT, lambda _p: sp)
-
-        result = bootstrap_keyring(tmp_path / "env")
-        assert result is False
-
-    def test_copies_allowlisted_packages(
+    def test_returns_true_when_backend_listed(
         self,
-        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/keyring")
+
+        def fake_run(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="keyring.backends.ArtifactsKeyring\n"
+            )
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert _keyring_backend_available() is True
+
+    def test_returns_false_when_backend_absent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/keyring")
+
+        def fake_run(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="keyring.backends.fail.Keyring\n"
+            )
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert _keyring_backend_available() is False
+
+    def test_returns_false_on_nonzero_exit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/keyring")
+
+        def fake_run(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="ArtifactsKeyring\n"
+            )
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert _keyring_backend_available() is False
+
+    def test_returns_false_when_subprocess_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/keyring")
+
+        def fake_run(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+            msg = "boom"
+            raise OSError(msg)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert _keyring_backend_available() is False
+
+
+class TestResolveKeyringCli:
+    """pip skips a keyring installed alongside pip; _resolve mirrors that."""
+
+    def test_returns_none_when_no_keyring(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda _name, **_k: None)
+        assert _resolve_keyring_cli() is None
+
+    def test_returns_cli_outside_scripts_dir(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A keyring not in the interpreter's scripts dir is used as-is.
+        monkeypatch.setattr("shutil.which", lambda _name, **_k: "/usr/bin/keyring")
+        assert _resolve_keyring_cli() == "/usr/bin/keyring"
+
+    def test_skips_keyring_in_scripts_dir(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Mirror pip: if the first keyring lives in the active env's scripts
+        # dir, it must be skipped and PATH re-searched for the next one.
+        scripts = tmp_path / "env" / "bin"
+        scripts.mkdir(parents=True)
+        env_keyring = str(scripts / "keyring")
+        system_keyring = "/usr/bin/keyring"
+
+        monkeypatch.setattr("sysconfig.get_path", lambda _name: str(scripts))
+
+        calls: list[str | None] = []
+
+        def fake_which(_name: str, path: str | None = None) -> str:
+            calls.append(path)
+            # First call (path=None) finds the env keyring; the re-search
+            # (path excludes the scripts dir) finds the system one.
+            return env_keyring if path is None else system_keyring
+
+        monkeypatch.setattr("shutil.which", fake_which)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(scripts), "/usr/bin"]))
+
+        assert _resolve_keyring_cli() == system_keyring
+        # A re-search happened with a PATH that no longer includes scripts.
+        assert calls[-1] is not None
+        assert str(scripts) not in calls[-1].split(os.pathsep)
+
+
+class TestLooksLikeAuthFailure:
+    def test_detects_auth_failures(self) -> None:
+        for output in (
+            "ERROR: HTTP error 401 Client Error: Unauthorized",
+            "403 Forbidden",
+            "WARNING: ... Unauthorized for url",
+            "Could not fetch URL https://feed/pip/: 401 Client Error",
+        ):
+            assert _looks_like_auth_failure(output) is True, output
+
+    def test_ignores_non_auth_output(self) -> None:
+        for output in (
+            "Could not find a version that satisfies the requirement",
+            "No matching distribution found for pip",
+            "Connection timed out",
+            "Found credentials in keyring for feed",
+            "",
+        ):
+            assert _looks_like_auth_failure(output) is False, output
+
+
+class TestVerify:
+    def test_passes_no_input_ignore_installed_and_closes_stdin(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, list[str]] = {}
+        stdin_seen: list[object] = []
+
+        def fake_run(
+            cmd: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            captured["cmd"] = cmd
+            stdin_seen.append(kwargs.get("stdin"))
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="")
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        verify("https://example.com/simple/")
+
+        cmd = captured["cmd"]
+        assert "--no-input" in cmd
+        assert "--ignore-installed" in cmd
+        assert stdin_seen == [subprocess.DEVNULL]
+
+    def test_timeout_exits_nonzero_without_hanging(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fake_run(
+            cmd: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            raise subprocess.TimeoutExpired(cmd, 60)
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        with pytest.raises(SystemExit):
+            verify("https://example.com/simple/")
+
+    def test_auth_failure_prints_keyring_hint(
+        self,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        src = self._make_site_packages(
-            tmp_path / "src",
-            {"keyring": "25.6.0", "artifacts_keyring_nofuss": "0.8.0"},
-        )
-        # Add requires so allowlist resolves
-        di = src / "artifacts_keyring_nofuss-0.8.0.dist-info"
-        (di / "METADATA").write_text(
-            "Name: artifacts-keyring-nofuss\nVersion: 0.8.0\n"
-            "Requires-Dist: keyring>=23.0\n"
-        )
-        dst = self._make_site_packages(tmp_path / "dst", {})
+        def fake_run(
+            cmd: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "  Could not fetch URL https://feed/pip/: 401 Client Error: "
+                    "Unauthorized\nERROR: No matching distribution found for pip"
+                ),
+            )
 
-        monkeypatch.setattr(self._SHIV, lambda: None)
-        monkeypatch.setattr(self._PROC, lambda: src)
-        monkeypatch.setattr(self._TGT, lambda _p: dst)
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
 
-        result = bootstrap_keyring(tmp_path / "env")
-        assert result is True
+        with pytest.raises(SystemExit):
+            verify("https://example.com/simple/")
+
         out = capsys.readouterr().out
-        assert "Installed" in out
-        assert (dst / "keyring" / "__init__.py").exists()
-        assert (dst / "artifacts_keyring_nofuss" / "__init__.py").exists()
+        assert "Authentication to the feed failed" in out
+        assert "authentication problem" in out
+        assert "artifacts-keyring-nofuss" in out
 
-    def test_copies_c_extension_so_files(
+    def test_reachable_but_missing_probe_is_ok(
         self,
-        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Feed authenticated fine (no 401/403) but doesn't mirror `pip`.
+        def fake_run(
+            cmd: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr="ERROR: No matching distribution found for pip",
+            )
+
+        monkeypatch.setattr("pypi_lockdown.verify.subprocess.run", fake_run)
+
+        verify("https://example.com/simple/")  # must NOT raise
+
+        out = capsys.readouterr().out
+        assert "OK Feed is reachable and authentication works" in out
+
+
+# ---------------------------------------------------------------------------
+# status / undo
+# ---------------------------------------------------------------------------
+
+
+def _patch_global_paths(
+    tmp_path: _Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[_Path, _Path]:
+    """Point user pip/uv config at temp paths and clear env vars."""
+    pip_conf = tmp_path / "pip" / "pip.conf"
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    monkeypatch.setattr("pypi_lockdown.configure._pip_config_user", lambda: pip_conf)
+    monkeypatch.setattr("pypi_lockdown.configure._uv_config_user", lambda: uv_toml)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
+    return pip_conf, uv_toml
+
+
+class TestStatus:
+    def test_reports_managed_configs(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+        configure(_FEED_URL)
+        capsys.readouterr()  # discard configure output
+
+        status()
+        out = capsys.readouterr().out
+        assert "[managed]" in out
+        assert _FEED_URL in out
+
+    def test_reports_unconfigured(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+
+        status()
+        out = capsys.readouterr().out
+        assert "(not configured)" in out
+        assert "[managed]" not in out
+
+
+class TestUndo:
+    def test_removes_managed_configs(
+        self,
+        tmp_path: _Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """C extension .so files listed by stem in top_level.txt are copied."""
-        src = self._make_site_packages(
-            tmp_path / "src",
-            {"keyring": "25.6.0", "artifacts_keyring_nofuss": "0.8.0"},
-        )
-        # Add cffi with a platform-specific .so file
-        cffi_di = src / "cffi-2.0.0.dist-info"
-        cffi_di.mkdir()
-        (cffi_di / "METADATA").write_text("Name: cffi\nVersion: 2.0.0\n")
-        (cffi_di / "WHEEL").write_text(
-            "Wheel-Version: 1.0\nTag: cp312-cp312-manylinux_2_34_x86_64\n"
-        )
-        (cffi_di / "top_level.txt").write_text("_cffi_backend\ncffi\n")
-        # Create the .so file and cffi package dir
-        so_name = "_cffi_backend.cpython-312-x86_64-linux-gnu.so"
-        (src / so_name).write_bytes(b"\x7fELF")
-        cffi_pkg = src / "cffi"
-        cffi_pkg.mkdir()
-        (cffi_pkg / "__init__.py").write_text("__version__ = '2.0.0'\n")
-        # Wire up dependency: nofuss -> cffi
-        di = src / "artifacts_keyring_nofuss-0.8.0.dist-info"
-        (di / "METADATA").write_text(
-            "Name: artifacts-keyring-nofuss\nVersion: 0.8.0\n"
-            "Requires-Dist: keyring>=23.0\n"
-            "Requires-Dist: cffi>=1.0\n"
-        )
-        dst = self._make_site_packages(tmp_path / "dst", {})
+        monkeypatch.chdir(tmp_path)
+        pip_conf, uv_toml = _patch_global_paths(tmp_path, monkeypatch)
+        configure(_FEED_URL)
+        assert pip_conf.exists()
+        assert uv_toml.exists()
 
-        monkeypatch.setattr(self._SHIV, lambda: None)
-        monkeypatch.setattr(self._PROC, lambda: src)
-        monkeypatch.setattr(self._TGT, lambda _p: dst)
-        # native_ok=True via matching version
-        monkeypatch.setattr(
-            "pypi_lockdown.standalone._target_python_version",
-            lambda _p: (sys.version_info.major, sys.version_info.minor),
-        )
+        undo()
+        assert not pip_conf.exists()
+        assert not uv_toml.exists()
 
-        result = bootstrap_keyring(tmp_path / "env")
-        assert result is True
-        assert (dst / so_name).exists(), (
-            f".so file not copied; dst contents: {[p.name for p in dst.iterdir()]}"
-        )
-        assert (dst / "cffi" / "__init__.py").exists()
+    def test_keeps_unmanaged_pip_settings(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        pip_conf, _ = _patch_global_paths(tmp_path, monkeypatch)
+        configure(_FEED_URL)
 
-
-# ---------------------------------------------------------------------------
-# End-to-end: pipx install → configure → keyring in target venv
-# ---------------------------------------------------------------------------
-
-
-def _install_dummy_backend(site_packages: Path) -> None:
-    """Drop a minimal keyring backend into *site_packages*.
-
-    Priority 1 — below ArtifactsKeyringBackend (9.9), so it only
-    handles URLs that the real backend declines.
-    """
-    pkg_dir = site_packages / "dummy_keyring_backend"
-    pkg_dir.mkdir(exist_ok=True)
-    (pkg_dir / "__init__.py").write_text(
-        "import keyring.backend\n"
-        "\n"
-        "class DummyBackend(keyring.backend.KeyringBackend):\n"
-        "    priority = 1\n"
-        "\n"
-        "    def get_password(self, service, username):\n"
-        "        return 'dummy-secret-token'\n"
-        "\n"
-        "    def set_password(self, service, username, password):\n"
-        "        raise NotImplementedError\n"
-        "\n"
-        "    def delete_password(self, service, username):\n"
-        "        raise NotImplementedError\n"
-    )
-    di = site_packages / "dummy_keyring_backend-0.0.1.dist-info"
-    di.mkdir(exist_ok=True)
-    (di / "METADATA").write_text(
-        "Metadata-Version: 2.1\nName: dummy-keyring-backend\nVersion: 0.0.1\n"
-    )
-    (di / "entry_points.txt").write_text(
-        "[keyring.backends]\ndummy = dummy_keyring_backend\n"
-    )
-    (di / "top_level.txt").write_text("dummy_keyring_backend\n")
-
-
-@pytest.mark.slow
-class TestPipxEndToEnd:
-    """Full integration test: pipx-install pypi-lockdown, then configure a venv."""
-
-    @staticmethod
-    def _run(
-        cmd: list[str],
-        env: dict[str, str] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-            env=env,
-        )
-
-    def test_pipx_bootstrap_into_venv(self, tmp_path: Path) -> None:  # noqa: PLR0915
-        import venv  # noqa: PLC0415
-
-        # --- 1. Create an isolated pipx home ---
-        pipx_home = tmp_path / "pipx_home"
-        pipx_bin = tmp_path / "pipx_bin"
-        pipx_home.mkdir()
-        pipx_bin.mkdir()
-
-        pkg_root = _Path(__file__).resolve().parent.parent
-
-        env = {
-            **os.environ,
-            "PIPX_HOME": str(pipx_home),
-            "PIPX_BIN_DIR": str(pipx_bin),
-        }
-        # Remove any VIRTUAL_ENV so pipx uses its own
-        env.pop("VIRTUAL_ENV", None)
-        env.pop("CONDA_PREFIX", None)
-
-        # --- 2. pipx install pypi-lockdown from the local checkout ---
-        r = self._run(
-            ["pipx", "install", str(pkg_root), "--force"],
-            env=env,
-        )
-        assert r.returncode == 0, (
-            f"pipx install failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-
-        pypi_lockdown_bin = pipx_bin / (
-            "pypi-lockdown.exe" if sys.platform == "win32" else "pypi-lockdown"
-        )
-        assert pypi_lockdown_bin.exists(), (
-            f"pypi-lockdown not in {pipx_bin}: {list(pipx_bin.iterdir())}"
-        )
-
-        # --- 3. Create a target venv (the "user" env) ---
-        user_venv = tmp_path / "user_venv"
-        venv.create(str(user_venv), with_pip=False)
-
-        # --- 4. Run pypi-lockdown configure with VIRTUAL_ENV ---
-        # Isolate HOME/XDG_CONFIG_HOME so we don't touch the real uv.toml
-        fake_home = tmp_path / "home"
-        fake_home.mkdir()
-        configure_env = {
-            **env,
-            "VIRTUAL_ENV": str(user_venv),
-            "HOME": str(fake_home),
-            "XDG_CONFIG_HOME": str(fake_home / ".config"),
-            **(
-                {
-                    "USERPROFILE": str(fake_home),
-                    "APPDATA": str(fake_home / "AppData" / "Roaming"),
-                    "LOCALAPPDATA": str(fake_home / "AppData" / "Local"),
-                }
-                if sys.platform == "win32"
-                else {}
-            ),
-        }
-        feed_url = (
-            "https://pkgs.dev.azure.com/pypi-lockdown"
-            "/pypi-lockdown/_packaging/public@Local/pypi/simple/"
-        )
-        r = self._run(
-            [str(pypi_lockdown_bin), "configure", feed_url],
-            env=configure_env,
-        )
-        assert r.returncode == 0, (
-            f"configure failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-
-        # --- 5. Verify pip.conf was written ---
-        pip_conf = user_venv / ("pip.ini" if sys.platform == "win32" else "pip.conf")
-        assert pip_conf.exists(), "pip.conf not written"
         cfg = configparser.ConfigParser()
         cfg.read(pip_conf)
-        assert cfg.get("global", "index-url") == feed_url
+        cfg.add_section("install")
+        cfg.set("install", "user", "true")
 
-        # --- 6. Verify keyring packages were bootstrapped ---
-        # Find the site-packages in the user venv (platform-dependent)
-        if sys.platform == "win32":
-            sp_candidates = list((user_venv / "Lib").glob("site-packages"))
-        else:
-            sp_candidates = list((user_venv / "lib").glob("python*/site-packages"))
-        assert sp_candidates, "No site-packages in user venv"
-        user_sp = sp_candidates[0]
+        with pip_conf.open("w") as fh:
+            fh.write(_MARKER)
+            cfg.write(fh)
 
-        keyring_installed = any(user_sp.glob("keyring-*.dist-info"))
-        nofuss_installed = any(user_sp.glob("artifacts_keyring_nofuss-*.dist-info"))
-        assert keyring_installed, (
-            f"keyring not bootstrapped into {user_sp}. "
-            f"Contents: {[p.name for p in user_sp.iterdir()]}"
-        )
-        assert nofuss_installed, (
-            f"artifacts-keyring-nofuss not bootstrapped into {user_sp}. "
-            f"Contents: {[p.name for p in user_sp.iterdir()]}"
-        )
+        undo()
+        assert pip_conf.exists()
+        result = configparser.ConfigParser()
+        result.read(pip_conf)
+        assert result.has_section("install")
+        assert not result.has_option("global", "index-url")
 
-        # --- 7. Verify keyring is actually importable in target venv ---
-        user_python = (
-            user_venv / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-        )
-        r = self._run(
-            [
-                str(user_python),
-                "-c",
-                "import keyring; "
-                "import artifacts_keyring_nofuss; "
-                "from importlib.metadata import version; "
-                "print('keyring', version('keyring')); "
-                "print('nofuss', version('artifacts-keyring-nofuss'))",
-            ]
-        )
-        assert r.returncode == 0, (
-            f"import failed in target venv:\nstdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-        assert "keyring" in r.stdout
-        assert "nofuss" in r.stdout
+    def test_ignores_unmanaged_files(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        pip_conf, _ = _patch_global_paths(tmp_path, monkeypatch)
+        pip_conf.parent.mkdir(parents=True, exist_ok=True)
+        original = "[global]\nindex-url = https://example.com/simple/\n"
+        pip_conf.write_text(original)
 
-        # --- 8. Verify the keyring backend is discoverable ---
-        r = self._run(
-            [
-                str(user_python),
-                "-c",
-                "from keyring.backend import get_all_keyring; "
-                "names = [type(k).__name__ for k in get_all_keyring()]; "
-                "print(names); "
-                "assert 'ArtifactsKeyringBackend' in names, "
-                "'backend not found in ' + str(names)",
-            ]
-        )
-        assert r.returncode == 0, (
-            f"keyring backend not discoverable:\nstdout: {r.stdout}\nstderr: {r.stderr}"
-        )
+        undo()
+        # File lacks the marker, so it must be left untouched.
+        assert pip_conf.exists()
+        assert pip_conf.read_text() == original
 
-        # --- 9. Install a dummy low-priority backend, verify chain ---
-        # Directly instantiate backends instead of `keyring get` to
-        # avoid querying the system keyring and to distinguish
-        # "declined" (returned None) from "crashed" (raised).
-        _install_dummy_backend(user_sp)
+    def test_project_scope_removes_pyproject_config(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname = 'x'\n[tool.hatch]\n"
+        )
+        configure(_FEED_URL, project_scope=True)
+        assert detect_index_url() == _FEED_URL
 
-        test_url = "https://not-ado.example.com/simple/"
-        r = self._run(
-            [
-                str(user_python),
-                "-c",
-                "from artifacts_keyring_nofuss._backend import "
-                "ArtifactsKeyringBackend; "
-                "b = ArtifactsKeyringBackend(); "
-                f"result = b.get_credential('{test_url}', None); "
-                "assert result is None, "
-                f"'expected None, got ' + repr(result); "
-                "print('DECLINED')",
-            ]
-        )
-        assert r.returncode == 0, (
-            f"ArtifactsKeyringBackend did not cleanly decline:\n"
-            f"stdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-        assert "DECLINED" in r.stdout
+        undo(project_scope=True)
+        assert detect_index_url() is None
 
-        # Now verify the dummy backend (priority 1) does return a token
-        r = self._run(
-            [
-                str(user_python),
-                "-c",
-                "from dummy_keyring_backend import DummyBackend; "
-                "b = DummyBackend(); "
-                f"pw = b.get_password('{test_url}', 'testuser'); "
-                "print(pw)",
-            ]
-        )
-        assert r.returncode == 0, (
-            f"Dummy backend failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-        assert r.stdout.strip() == "dummy-secret-token"
+    def test_default_scope_keeps_pyproject_config(
+        self,
+        tmp_path: _Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _patch_global_paths(tmp_path, monkeypatch)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        configure(_FEED_URL, project_scope=True)
+        assert detect_index_url() == _FEED_URL
+
+        undo()  # no --project
+        assert detect_index_url() == _FEED_URL

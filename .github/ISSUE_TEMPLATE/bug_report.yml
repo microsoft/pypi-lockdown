@@ -37,6 +37,7 @@ body:
       label: Install method
       options:
         - pip install (wheel)
-        - Standalone .pyz
+        - uv tool install
+        - pipx install
     validations:
       required: true

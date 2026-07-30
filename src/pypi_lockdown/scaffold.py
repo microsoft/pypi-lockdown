@@ -30,9 +30,6 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[project.optional-dependencies]
-build = ["shiv", "tox"]
-
 [project.scripts]
 {name} = "{module}.__main__:main"
 """
@@ -50,27 +47,13 @@ def main():
         prog="{name}",
         description="Lock down pip/uv/poetry/hatch to use the {name} internal feed.",
     )
-    parser.add_argument(
-        "--user",
-        action="store_true",
-        help="Write pip config to user home instead of the active Python environment",
-    )
-    args = parser.parse_args()
-    configure(INDEX_URL, user_scope=args.user)
+    parser.parse_args()
+    configure(INDEX_URL)
 
 
 if __name__ == "__main__":
     main()
 """
-
-_TOX_INI = (
-    "[tox]\nenv_list = standalone\n\n"
-    "[testenv:standalone]\n"
-    "description = Build standalone .pyz zipapps for all target platforms\n"
-    "deps =\n    shiv\n    build\n"
-    "commands =\n"
-    "    python -m pypi_lockdown._build_standalone {posargs:all}\n"
-)
 
 
 def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
@@ -90,14 +73,12 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     (root / "pyproject.toml").write_text(
         _PYPROJECT_TOML.format(name=name, module=module)
     )
-    (root / "tox.ini").write_text(_TOX_INI)
     (pkg / "__init__.py").write_text("")
     (pkg / "__main__.py").write_text(_MAIN_PY.format(name=name, index_url=index_url))
 
     print(f"\nScaffolded {name} at {root}\n")
     print(f"  {root}/")
     print("  +-- pyproject.toml")
-    print("  +-- tox.ini")
     print(f"  +-- src/{module}/")
     print("      +-- __init__.py")
     print("      +-- __main__.py")
@@ -113,7 +94,6 @@ def scaffold(name: str, index_url: str, output_dir: Path | None = None) -> Path:
     print("    pip install -e .")
     print(f"    python -m {module}          # test it")
     print("    python -m build             # build for publishing")
-    print("    tox -e standalone           # build standalone .pyz files")
     print()
 
     return root
