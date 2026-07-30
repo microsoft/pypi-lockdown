@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+import os
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -784,12 +785,12 @@ class TestResolveKeyringCli:
             return env_keyring if path is None else system_keyring
 
         monkeypatch.setattr("shutil.which", fake_which)
-        monkeypatch.setenv("PATH", f"{scripts}:/usr/bin")
+        monkeypatch.setenv("PATH", os.pathsep.join([str(scripts), "/usr/bin"]))
 
         assert _resolve_keyring_cli() == system_keyring
         # A re-search happened with a PATH that no longer includes scripts.
         assert calls[-1] is not None
-        assert str(scripts) not in calls[-1]
+        assert str(scripts) not in calls[-1].split(os.pathsep)
 
 
 class TestLooksLikeAuthFailure:
