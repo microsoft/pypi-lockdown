@@ -7,18 +7,21 @@ on:
 
 permissions:
   contents: read
-  attestations: write  # for build provenance attestations
-  id-token: write  # for attestation signing
 
 jobs:
   build-python-dist:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # for attestation signing
+      attestations: write  # for build provenance attestations
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0  # setuptools-scm needs tags for versioning
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
@@ -27,11 +30,11 @@ jobs:
           pip install build
           python -m build
 
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
         with:
           subject-path: dist/*
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: python-dist
           path: dist/
@@ -42,7 +45,7 @@ jobs:
     permissions:
       contents: write  # for uploading release assets
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: python-dist
           path: dist/
@@ -51,7 +54,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh release create "$TAG_NAME" dist/* --generate-notes
 
   publish-pypi:
     if: github.repository == 'microsoft/pypi-lockdown'
@@ -61,9 +65,9 @@ jobs:
       id-token: write  # for PyPI trusted publishing (OIDC)
     environment: pypi
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: python-dist
           path: dist/
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
