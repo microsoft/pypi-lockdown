@@ -27,5 +27,5 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies:
-          - keyring>=23.0
+          - keyring>=25.7.0
           - requests>=2.20
