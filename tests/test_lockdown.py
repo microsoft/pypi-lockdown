@@ -23,6 +23,7 @@ from pypi_lockdown.configure import (
     _write_pyproject_uv,
     _write_uv_config,
     configure,
+    confirm_untrusted_index_url,
     detect_index_url,
 )
 from pypi_lockdown.standalone import (
@@ -635,6 +636,78 @@ class TestCiFlag:
 # ---------------------------------------------------------------------------
 # Auto-detect feed URL
 # ---------------------------------------------------------------------------
+
+
+class TestConfirmUntrustedIndexUrl:
+    """Trust gate for auto-detected (untrusted) index URLs -- CWE-918."""
+
+    def test_refuses_in_ci_mode(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert confirm_untrusted_index_url(_FEED_URL, ci=True) is False
+        out = capsys.readouterr().out
+        assert "Refusing" in out
+
+    def test_refuses_without_tty(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        assert confirm_untrusted_index_url(_FEED_URL) is False
+
+    def test_confirms_when_user_accepts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt, **_kw: True,
+        )
+        assert confirm_untrusted_index_url(_FEED_URL) is True
+
+    def test_declines_when_user_rejects(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt, **_kw: False,
+        )
+        assert confirm_untrusted_index_url(_FEED_URL) is False
+
+    def test_warning_shows_target_host(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt, **_kw: False,
+        )
+        confirm_untrusted_index_url(
+            "https://evil.example.com/simple/",
+        )
+        out = capsys.readouterr().out
+        assert "Host: evil.example.com" in out
+
+    def test_escapes_terminal_control_sequences(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # A hostile URL with ANSI escape + newline must not reach the terminal
+        # verbatim, or it could clear/rewrite the warning the user relies on.
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt, **_kw: False,
+        )
+        confirm_untrusted_index_url(
+            "https://host\x1b[2J\x1b[H\nTrusted: yes.example.com/simple/",
+        )
+        out = capsys.readouterr().out
+        assert "\x1b" not in out
+        assert "\\x1b" in out
 
 
 class TestDetectIndexUrl:

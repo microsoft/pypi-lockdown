@@ -5,11 +5,27 @@ from __future__ import annotations
 import configparser
 import os
 import platform
+import re
 from pathlib import Path
 
 _MARKER = (
     "# Managed by pypi-lockdown -- safe to edit, will be overwritten on next run\n"
 )
+
+# C0 controls (incl. ESC, CR, LF, BEL), DEL, and C1 controls. Used to neutralise
+# terminal escape / newline injection when echoing untrusted (auto-detected) URLs.
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _safe_for_terminal(text: str) -> str:
+    """Escape control characters so untrusted text cannot manipulate the terminal.
+
+    URLs auto-detected from ``pyproject.toml`` are attacker-controlled; printing
+    them verbatim would let embedded escape or newline sequences clear/rewrite
+    the warning (or forge CI log lines) and subvert the confirmation prompt. The
+    result is for display only -- the original URL is still used for configuration.
+    """
+    return _CONTROL_CHARS.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
 
 
 # ---------------------------------------------------------------------------
@@ -316,18 +332,69 @@ def _write_pyproject_hatch(path: Path, index_url: str) -> None:
     print(f"  OK {path} ([tool.hatch.envs.default.env-vars])")
 
 
-def _prompt_yes_no(prompt: str) -> bool:
-    """Prompt the user for yes/no confirmation. Returns True for yes."""
+def _prompt_yes_no(prompt: str, *, default: bool = True) -> bool:
+    """Prompt the user for yes/no confirmation. Returns True for yes.
+
+    In non-interactive contexts (no TTY) this always returns ``False`` so that
+    no change is ever applied without an explicit human decision. ``default``
+    controls the answer used when the user just presses Enter.
+    """
     import sys  # noqa: PLC0415
 
     if not sys.stdin.isatty():
         return False
+    suffix = "[Y/n]" if default else "[y/N]"
     try:
-        answer = input(f"  {prompt} [Y/n] ").strip().lower()
+        answer = input(f"  {prompt} {suffix} ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
         return False
-    return answer in ("", "y", "yes")
+    if answer == "":
+        return default
+    return answer in ("y", "yes")
+
+
+def confirm_untrusted_index_url(index_url: str, *, ci: bool = False) -> bool:
+    """Confirm use of an index URL that came from an untrusted source.
+
+    Auto-detected URLs originate from ``pyproject.toml`` in the current working
+    directory, which is attacker-controlled in any cloned repository. Applying
+    one routes package installs *and* keyring credential lookups at the target
+    host, so it must never be trusted silently.
+
+    Requires an interactive confirmation that prominently shows the target host
+    and defaults to "no", and refuses outright in non-interactive (CI / no-TTY)
+    contexts, where an explicit ``INDEX_URL`` must be supplied instead.
+    """
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    try:
+        hostname = urlparse(index_url).hostname or "(unknown)"
+    except ValueError:
+        hostname = "(unparseable)"
+    host = _safe_for_terminal(hostname)
+    display_url = _safe_for_terminal(index_url)
+    if ci:
+        print(
+            "\n  ERROR: Refusing to use an auto-detected feed URL in CI mode.\n"
+            f"    Detected URL: {display_url}\n"
+            "    Pass INDEX_URL explicitly to configure a trusted feed.\n"
+        )
+        return False
+
+    print(
+        "\n  WARNING: The feed URL below was auto-detected from pyproject.toml in"
+        " the current\n"
+        "  directory, which is untrusted in a cloned repository. Configuring it"
+        " will route\n"
+        "  package installs and keyring credential lookups to this host:\n"
+        f"\n    Host: {host}\n"
+        f"    URL:  {display_url}\n"
+    )
+    return _prompt_yes_no(
+        "Trust this host and configure it as your package index?",
+        default=False,
+    )
 
 
 def _configure_pyproject(index_url: str) -> None:
@@ -354,14 +421,15 @@ def _configure_pyproject(index_url: str) -> None:
 def configure(index_url: str, *, user_scope: bool = False, ci: bool = False) -> None:
     if not index_url.startswith("https://"):
         print(
-            f"\n  ERROR: Refusing to configure non-HTTPS index URL: {index_url}\n"
+            f"\n  ERROR: Refusing to configure non-HTTPS index URL:"
+            f" {_safe_for_terminal(index_url)}\n"
             "    HTTPS is required to protect credentials and package integrity.\n"
         )
         raise SystemExit(1)
 
     env = _env_path()
 
-    print(f"\nConfiguring index: {index_url}\n")
+    print(f"\nConfiguring index: {_safe_for_terminal(index_url)}\n")
 
     # --- pip ---
     if env and not user_scope:

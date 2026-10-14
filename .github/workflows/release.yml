@@ -86,12 +86,53 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: gh release create "$TAG_NAME" dist/* --generate-notes
 
+  verify-release-tag:
+    # Best-effort backstop for CWE-862, NOT an authoritative control. Because a
+    # `push: tags` workflow runs from the tagged ref itself, an attacker who can
+    # craft and push an arbitrary tag can also modify or delete this job in that
+    # same commit, so it only blocks the naive case of tagging an existing
+    # off-branch commit without touching the workflow. The authoritative controls
+    # live outside this tag-controlled file and MUST be configured:
+    #   1. A tag ruleset restricting who may create/push `v*` tags.
+    #   2. The 'pypi' environment (used by publish-pypi) with required reviewers
+    #      and a deployment tag restriction, so a human approves every publish.
+    if: github.repository == 'microsoft/pypi-lockdown'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag commit is on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$TAG_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Refusing to publish: tag $TAG_NAME ($TAG_SHA) is not" \
+                 "an ancestor of $DEFAULT_BRANCH. Only commits merged to the" \
+                 "default branch may be released."
+            exit 1
+          fi
+          echo "Tag $TAG_NAME ($TAG_SHA) is reachable from $DEFAULT_BRANCH."
+
   publish-pypi:
     if: github.repository == 'microsoft/pypi-lockdown'
-    needs: release
+    needs: [release, verify-release-tag]
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # for PyPI trusted publishing (OIDC)
+    # The 'pypi' environment is the authoritative publish gate and MUST require
+    # reviewers plus a deployment tag restriction limiting it to protected v*
+    # tags, so a human approves every publish. The verify-release-tag job above
+    # is only a weak backstop (it runs from the tagged ref and so cannot defend
+    # against an attacker who crafts the tag commit); it does not replace these
+    # environment protections or a tag ruleset.
     environment: pypi
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
