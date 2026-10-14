@@ -86,12 +86,46 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: gh release create "$TAG_NAME" dist/* --generate-notes
 
+  verify-release-tag:
+    # Defense-in-depth for CWE-862: do not rely solely on the (source-invisible)
+    # 'pypi' environment protection rules. Refuse to publish a tag whose commit
+    # is not reachable from the default branch, so an arbitrary off-branch commit
+    # tagged by anyone with contents:write cannot be auto-published.
+    if: github.repository == 'microsoft/pypi-lockdown'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag commit is on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$TAG_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Refusing to publish: tag $TAG_NAME ($TAG_SHA) is not" \
+                 "an ancestor of $DEFAULT_BRANCH. Only commits merged to the" \
+                 "default branch may be released."
+            exit 1
+          fi
+          echo "Tag $TAG_NAME ($TAG_SHA) is reachable from $DEFAULT_BRANCH."
+
   publish-pypi:
     if: github.repository == 'microsoft/pypi-lockdown'
-    needs: release
+    needs: [release, verify-release-tag]
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # for PyPI trusted publishing (OIDC)
+    # The 'pypi' environment MUST be configured with required reviewers and a
+    # deployment branch/tag restriction limiting it to protected v* tags, so a
+    # human approves every publish. The verify-release-tag job above is an
+    # in-workflow backstop; it does not replace those environment protections.
     environment: pypi
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7

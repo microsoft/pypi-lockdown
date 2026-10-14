@@ -316,18 +316,64 @@ def _write_pyproject_hatch(path: Path, index_url: str) -> None:
     print(f"  OK {path} ([tool.hatch.envs.default.env-vars])")
 
 
-def _prompt_yes_no(prompt: str) -> bool:
-    """Prompt the user for yes/no confirmation. Returns True for yes."""
+def _prompt_yes_no(prompt: str, *, default: bool = True) -> bool:
+    """Prompt the user for yes/no confirmation. Returns True for yes.
+
+    In non-interactive contexts (no TTY) this always returns ``False`` so that
+    no change is ever applied without an explicit human decision. ``default``
+    controls the answer used when the user just presses Enter.
+    """
     import sys  # noqa: PLC0415
 
     if not sys.stdin.isatty():
         return False
+    suffix = "[Y/n]" if default else "[y/N]"
     try:
-        answer = input(f"  {prompt} [Y/n] ").strip().lower()
+        answer = input(f"  {prompt} {suffix} ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
         return False
-    return answer in ("", "y", "yes")
+    if answer == "":
+        return default
+    return answer in ("y", "yes")
+
+
+def confirm_untrusted_index_url(index_url: str, *, ci: bool = False) -> bool:
+    """Confirm use of an index URL that came from an untrusted source.
+
+    Auto-detected URLs originate from ``pyproject.toml`` in the current working
+    directory, which is attacker-controlled in any cloned repository. Applying
+    one routes package installs *and* keyring credential lookups at the target
+    host, so it must never be trusted silently.
+
+    Requires an interactive confirmation that prominently shows the target host
+    and defaults to "no", and refuses outright in non-interactive (CI / no-TTY)
+    contexts, where an explicit ``INDEX_URL`` must be supplied instead.
+    """
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    host = urlparse(index_url).hostname or "(unknown)"
+    if ci:
+        print(
+            "\n  ERROR: Refusing to use an auto-detected feed URL in CI mode.\n"
+            f"    Detected URL: {index_url}\n"
+            "    Pass INDEX_URL explicitly to configure a trusted feed.\n"
+        )
+        return False
+
+    print(
+        "\n  WARNING: The feed URL below was auto-detected from pyproject.toml in"
+        " the current\n"
+        "  directory, which is untrusted in a cloned repository. Configuring it"
+        " will route\n"
+        "  package installs and keyring credential lookups to this host:\n"
+        f"\n    Host: {host}\n"
+        f"    URL:  {index_url}\n"
+    )
+    return _prompt_yes_no(
+        "Trust this host and configure it as your package index?",
+        default=False,
+    )
 
 
 def _configure_pyproject(index_url: str) -> None:

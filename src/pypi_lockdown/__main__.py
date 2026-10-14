@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .configure import configure, detect_index_url
+from .configure import configure, confirm_untrusted_index_url, detect_index_url
 from .scaffold import scaffold
 from .verify import verify
 
@@ -87,6 +87,7 @@ def main() -> None:
 
     if args.command == "configure" or args.command is None:
         index_url = getattr(args, "index_url", None)
+        ci = getattr(args, "ci", False)
         if index_url is None:
             index_url = detect_index_url()
             if index_url is None:
@@ -96,11 +97,19 @@ def main() -> None:
                     " [[tool.uv.index]], [[tool.poetry.source]],"
                     " or [tool.hatch.envs.default.env-vars])"
                 )
-            print(f"Auto-detected feed URL from pyproject.toml: {index_url}\n")
+            # The URL came from pyproject.toml in the cwd -- untrusted in a
+            # cloned repo. Require explicit confirmation before applying it.
+            if not confirm_untrusted_index_url(index_url, ci=ci):
+                parser.error(
+                    "Refusing to use the auto-detected feed URL from"
+                    " pyproject.toml. Pass INDEX_URL explicitly to configure a"
+                    " trusted feed."
+                )
+            print(f"Using feed URL auto-detected from pyproject.toml: {index_url}\n")
         configure(
             index_url,
             user_scope=getattr(args, "user", False),
-            ci=getattr(args, "ci", False),
+            ci=ci,
         )
         if getattr(args, "verify", False):
             verify(index_url)
