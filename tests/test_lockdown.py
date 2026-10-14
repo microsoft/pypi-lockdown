@@ -689,7 +689,7 @@ class TestConfirmUntrustedIndexUrl:
             "https://evil.example.com/simple/",
         )
         out = capsys.readouterr().out
-        assert "evil.example.com" in out
+        assert "Host: evil.example.com" in out
 
 
 class TestDetectIndexUrl:
