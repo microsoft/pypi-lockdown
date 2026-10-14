@@ -3,7 +3,12 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .configure import configure, confirm_untrusted_index_url, detect_index_url
+from .configure import (
+    _safe_for_terminal,
+    configure,
+    confirm_untrusted_index_url,
+    detect_index_url,
+)
 from .scaffold import scaffold
 from .verify import verify
 
@@ -105,7 +110,10 @@ def main() -> None:
                     " pyproject.toml. Pass INDEX_URL explicitly to configure a"
                     " trusted feed."
                 )
-            print(f"Using feed URL auto-detected from pyproject.toml: {index_url}\n")
+            print(
+                "Using feed URL auto-detected from pyproject.toml:"
+                f" {_safe_for_terminal(index_url)}\n"
+            )
         configure(
             index_url,
             user_scope=getattr(args, "user", False),

@@ -691,6 +691,24 @@ class TestConfirmUntrustedIndexUrl:
         out = capsys.readouterr().out
         assert "Host: evil.example.com" in out
 
+    def test_escapes_terminal_control_sequences(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # A hostile URL with ANSI escape + newline must not reach the terminal
+        # verbatim, or it could clear/rewrite the warning the user relies on.
+        monkeypatch.setattr(
+            "pypi_lockdown.configure._prompt_yes_no",
+            lambda _prompt, **_kw: False,
+        )
+        confirm_untrusted_index_url(
+            "https://host\x1b[2J\x1b[H\nTrusted: yes.example.com/simple/",
+        )
+        out = capsys.readouterr().out
+        assert "\x1b" not in out
+        assert "\\x1b" in out
+
 
 class TestDetectIndexUrl:
     def test_returns_none_when_no_pyproject(
