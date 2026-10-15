@@ -1289,11 +1289,13 @@ class TestPipxEndToEnd:
             [
                 str(user_python),
                 "-c",
-                "import keyring; "
-                "import artifacts_keyring_nofuss; "
-                "from importlib.metadata import version; "
-                "print('keyring', version('keyring')); "
-                "print('nofuss', version('artifacts-keyring-nofuss'))",
+                (
+                    "import keyring; "
+                    "import artifacts_keyring_nofuss; "
+                    "from importlib.metadata import version; "
+                    "print('keyring', version('keyring')); "
+                    "print('nofuss', version('artifacts-keyring-nofuss'))"
+                ),
             ]
         )
         assert r.returncode == 0, (
@@ -1307,11 +1309,13 @@ class TestPipxEndToEnd:
             [
                 str(user_python),
                 "-c",
-                "from keyring.backend import get_all_keyring; "
-                "names = [type(k).__name__ for k in get_all_keyring()]; "
-                "print(names); "
-                "assert 'ArtifactsKeyringBackend' in names, "
-                "'backend not found in ' + str(names)",
+                (
+                    "from keyring.backend import get_all_keyring; "
+                    "names = [type(k).__name__ for k in get_all_keyring()]; "
+                    "print(names); "
+                    "assert 'ArtifactsKeyringBackend' in names, "
+                    "'backend not found in ' + str(names)"
+                ),
             ]
         )
         assert r.returncode == 0, (
@@ -1329,13 +1333,15 @@ class TestPipxEndToEnd:
             [
                 str(user_python),
                 "-c",
-                "from artifacts_keyring_nofuss._backend import "
-                "ArtifactsKeyringBackend; "
-                "b = ArtifactsKeyringBackend(); "
-                f"result = b.get_credential('{test_url}', None); "
-                "assert result is None, "
-                f"'expected None, got ' + repr(result); "
-                "print('DECLINED')",
+                (
+                    "from artifacts_keyring_nofuss._backend import "
+                    "ArtifactsKeyringBackend; "
+                    "b = ArtifactsKeyringBackend(); "
+                    f"result = b.get_credential('{test_url}', None); "
+                    "assert result is None, "
+                    f"'expected None, got ' + repr(result); "
+                    "print('DECLINED')"
+                ),
             ]
         )
         assert r.returncode == 0, (
@@ -1349,10 +1355,12 @@ class TestPipxEndToEnd:
             [
                 str(user_python),
                 "-c",
-                "from dummy_keyring_backend import DummyBackend; "
-                "b = DummyBackend(); "
-                f"pw = b.get_password('{test_url}', 'testuser'); "
-                "print(pw)",
+                (
+                    "from dummy_keyring_backend import DummyBackend; "
+                    "b = DummyBackend(); "
+                    f"pw = b.get_password('{test_url}', 'testuser'); "
+                    "print(pw)"
+                ),
             ]
         )
         assert r.returncode == 0, (
