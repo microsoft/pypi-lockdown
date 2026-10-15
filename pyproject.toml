@@ -64,6 +64,7 @@ select = ["ALL"]
 ignore = [
     "COM812",   # trailing-comma — conflicts with ruff formatter
     "ISC001",   # single-line-implicit-string-concat — conflicts with ruff formatter
+    "CPY001",   # source files do not carry separate copyright headers
     "D",        # pydocstyle — docstring coverage is intentionally minimal
     "T201",     # print — this is a CLI tool, print is the primary output mechanism
     "S603",     # subprocess-without-shell-equals-true — we call known build tools
